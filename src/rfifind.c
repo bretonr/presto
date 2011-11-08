@@ -322,6 +322,10 @@ int main(int argc, char *argv[])
          struct spectra_info s;
          
          printf("PSRFITS input file information:\n");
+          // -1 causes the data to determine if we use weights, scales, & offsets
+         s.apply_weight = (cmd->noweightsP) ? 0 : -1;
+         s.apply_scale  = (cmd->noscalesP) ? 0 : -1;
+         s.apply_offset = (cmd->nooffsetsP) ? 0 : -1;
          read_PSRFITS_files(cmd->argv, cmd->argc, &s);
          N = s.N;
          ptsperblock = s.spectra_per_subint;
@@ -625,8 +629,8 @@ int main(int argc, char *argv[])
                    &oldmask, &newmask, rfivect, numrfi,
                    cmd->rfixwinP, cmd->rfipsP, cmd->xwinP);
 
-      free(zapints);
-      free(zapchan);
+      vect_free(zapints);
+      vect_free(zapchan);
    }
 
    /* Write the new mask and bytemask to the file */
@@ -718,23 +722,23 @@ int main(int argc, char *argv[])
    free(bytemaskfilenm);
    free(maskfilenm);
    free(rfifilenm);
-   free(dataavg[0]);
-   free(dataavg);
-   free(datastd[0]);
-   free(datastd);
-   free(datapow[0]);
-   free(datapow);
-   free(bytemask[0]);
-   free(bytemask);
+   vect_free(dataavg[0]);
+   vect_free(dataavg);
+   vect_free(datastd[0]);
+   vect_free(datastd);
+   vect_free(datapow[0]);
+   vect_free(datapow);
+   vect_free(bytemask[0]);
+   vect_free(bytemask);
    if (!cmd->nocomputeP) {
       for (ii = 0; ii < numfiles; ii++)
          fclose(infiles[ii]);
       free(infiles);
-      free(chandata);
+      vect_free(chandata);
       if (insubs)
-         free(srawdata);
+         vect_free(srawdata);
       else
-         free(rawdata);
+         vect_free(rawdata);
    }
    return (0);
 }

@@ -507,8 +507,10 @@ int read_GMRT(FILE * infiles[], int numfiles, float *data,
          }
 
          /* Only use the recently measured padding if all the channels aren't masked */
-         if ((clip_sigma_st > 0.0) && !(mask && (*nummasked == -1)))
-            memcpy(padvals, newpadvals, MAXNUMCHAN);
+         if ((clip_sigma_st > 0.0) && 
+             !(mask && (*nummasked == -1)) &&
+             (padvals != newpadvals))
+             memcpy(padvals, newpadvals, MAXNUMCHAN);
 
          if (mask) {
             if (*nummasked == -1) {     /* If all channels are masked */
@@ -529,8 +531,8 @@ int read_GMRT(FILE * infiles[], int numfiles, float *data,
             dedisp(currentdata, lastdata, numpts, numchan_st, dispdelays, data);
          SWAP(currentdata, lastdata);
          if (numread != numblocks) {
-            free(rawdata1);
-            free(rawdata2);
+            vect_free(rawdata1);
+            vect_free(rawdata2);
             allocd = 0;
          }
          if (firsttime)
@@ -610,8 +612,10 @@ int prep_GMRT_subbands(unsigned char *rawdata, float *data,
    }
 
    /* Only use the recently measured padding if all the channels aren't masked */
-   if ((clip_sigma_st > 0.0) && !(mask && (*nummasked == -1)))
-      memcpy(padvals, newpadvals, MAXNUMCHAN);
+   if ((clip_sigma_st > 0.0) && 
+       !(mask && (*nummasked == -1)) &&
+       (padvals != newpadvals))
+       memcpy(padvals, newpadvals, MAXNUMCHAN);
 
    if (mask) {
       if (*nummasked == -1) {   /* If all channels are masked */

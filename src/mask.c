@@ -91,14 +91,14 @@ void free_mask(mask obsmask)
    for (ii = 0; ii < obsmask.numint; ii++) {
       if (obsmask.num_chans_per_int[ii] > 0 &&
           obsmask.num_chans_per_int[ii] <= obsmask.numchan)
-         free(obsmask.chans[ii]);
+         vect_free(obsmask.chans[ii]);
    }
    free(obsmask.chans);
-   free(obsmask.num_chans_per_int);
+   vect_free(obsmask.num_chans_per_int);
    if (obsmask.num_zap_chans)
-      free(obsmask.zap_chans);
+      vect_free(obsmask.zap_chans);
    if (obsmask.num_zap_ints)
-      free(obsmask.zap_ints);
+      vect_free(obsmask.zap_ints);
 }
 
 
@@ -172,7 +172,7 @@ void calc_avgmedstd(float *arr, int numarr, float fraction,
    *avg = (float) davg;
    *med = tmparr[numarr / 2];
    *std = sqrt(dstd);
-   free(tmparr);
+   vect_free(tmparr);
 }
 
 
@@ -218,8 +218,8 @@ int determine_padvals(char *maskfilenm, mask * obsmask, float *padvals[])
                            *padvals + ii, &tmp1, &tmp2);
          printf
              ("...succeded.  Set the padding values equal to the mid-80%% channel averages.\n");
-         free(dataavg[0]);
-         free(dataavg);
+         vect_free(dataavg[0]);
+         vect_free(dataavg);
          fclose(statsfile);
          return 1;
       } else {
@@ -298,13 +298,18 @@ int check_mask(double starttime, double duration, mask * obsmask, int *maskchans
 
    /* Mask the same channels as for the last call */
    if (loint == old_loint && hiint == old_hiint)
-      return old_numchan;
+       return old_numchan;
 
    /* Make sure that we aren't past the last interval */
    if (loint >= obsmask->numint)
-      loint = obsmask->numint - 1;
+       loint = obsmask->numint - 1;
    if (hiint >= obsmask->numint)
-      hiint = loint;
+       hiint = loint;
+
+   if ((loint >= obsmask->numint + 1) ||
+       (hiint >= obsmask->numint + 1)) {
+       printf("Warning!!  Trying to use a mask interval well after the mask ends!\n");
+   }
 
    /* Determine new channels to mask */
    if (loint == hiint) {
@@ -354,7 +359,7 @@ int check_mask(double starttime, double duration, mask * obsmask, int *maskchans
                                    obsmask->chans[hiint],
                                    obsmask->num_chans_per_int[hiint], maskchans);
       if (obsmask->num_zap_chans)
-         free(tmpchans);
+         vect_free(tmpchans);
    }
    return old_numchan;
 }

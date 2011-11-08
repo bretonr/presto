@@ -915,8 +915,10 @@ int read_WAPP(FILE * infiles[], int numfiles, float *data,
          }
 
          /* Only use the recently measured padding if all the channels aren't masked */
-         if ((clip_sigma_st > 0.0) && !(mask && (*nummasked == -1)))
-            memcpy(padvals, newpadvals, WAPP_MAXLAGLEN);
+         if ((clip_sigma_st > 0.0) && 
+             !(mask && (*nummasked == -1)) &&
+             (padvals != newpadvals))
+             memcpy(padvals, newpadvals, WAPP_MAXLAGLEN);
          
          if (mask) {
             if (*nummasked == -1) {     /* If all channels are masked */
@@ -938,11 +940,11 @@ int read_WAPP(FILE * infiles[], int numfiles, float *data,
             dedisp(currentdata, lastdata, numpts, numchan_st, dispdelays, data);
          SWAP(currentdata, lastdata);
          if (numread != numblocks) {
-            free(rawdata1);
-            free(rawdata2);
+            vect_free(rawdata1);
+            vect_free(rawdata2);
             fftwf_destroy_plan(fftplan);
             fftwf_free(lags);
-            free(window_st);
+            vect_free(window_st);
             allocd = 0;
          }
          if (firsttime)
@@ -985,7 +987,7 @@ void get_WAPP_channel(int channum, float chandat[],
       if ((trtn = transpose_bytes(rawdata, ptsperchan, numchan_st,
                                   move, move_size)) < 0)
          printf("Error %d in transpose_bytes().\n", trtn);
-      free(move);
+      vect_free(move);
    }
 
    /* Select the correct channel */
@@ -1044,8 +1046,10 @@ int prep_WAPP_subbands(unsigned char *rawdata, float *data,
    }
 
    /* Only use the recently measured padding if all the channels aren't masked */
-   if ((clip_sigma_st > 0.0) && !(mask && (*nummasked == -1)))
-      memcpy(padvals, newpadvals, WAPP_MAXLAGLEN);
+   if ((clip_sigma_st > 0.0) && 
+       !(mask && (*nummasked == -1)) &&
+       (padvals != newpadvals))
+       memcpy(padvals, newpadvals, WAPP_MAXLAGLEN);
          
    if (mask) {
       if (*nummasked == -1) {   /* If all channels are masked */
@@ -1226,7 +1230,7 @@ void convert_WAPP_point(void *rawdata, unsigned char *bytes, IFs ifs)
             /* Sum the unscaled IFs */
             for (ii = 0; ii < numwappchan_st; ii++)
                lags[ii] += templags[ii];
-            free(templags);
+            vect_free(templags);
          }
       }
    }

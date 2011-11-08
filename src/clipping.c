@@ -124,9 +124,9 @@ int new_clip_times(unsigned char *rawdata, int ptsperblk, int numchan,
    }
    blocksread++;
 
-   free(chan_avg_temp);
-   free(zero_dm_block);
-   free(median_temp);
+   vect_free(chan_avg_temp);
+   vect_free(zero_dm_block);
+   vect_free(median_temp);
 
    return clipped;
 }
@@ -229,11 +229,15 @@ int clip_times(unsigned char *rawdata, int ptsperblk, int numchan,
    }
 
    /* Update the good channel levels */
-
    scaling = running_avg / median_sum;
-   for (ii = 0; ii < numchan; ii++)
-      good_chan_levels[ii] = (unsigned char) (median_chan_levels[ii] *
-                                              scaling + 0.5);
+   for (ii = 0; ii < numchan; ii++) {
+       unsigned char newlevel = (unsigned char) (median_chan_levels[ii] *
+                                                 scaling + 0.5);
+       if (!firsttime && abs((int)newlevel-(int)good_chan_levels[ii]) > 220) {
+           newlevel = (newlevel < good_chan_levels[ii]) ? 255 : 0; // Clip
+       }
+       good_chan_levels[ii] = newlevel;
+   }
 
    /* Replace the bad channel data with channel median values */
    /* that are scaled to equal the running_avg.               */
@@ -249,8 +253,8 @@ int clip_times(unsigned char *rawdata, int ptsperblk, int numchan,
    }
    blocksread++;
 
-   free(zero_dm_block);
-   free(median_temp);
+   vect_free(zero_dm_block);
+   vect_free(median_temp);
 
    return clipped;
 }
@@ -372,8 +376,8 @@ int subs_clip_times(float *rawdata, int ptsperblk, int numchan,
    }
    blocksread++;
 
-   free(zero_dm_block);
-   free(median_temp);
+   vect_free(zero_dm_block);
+   vect_free(median_temp);
 
    return clipped;
 }

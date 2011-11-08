@@ -143,6 +143,77 @@ void strtofilename(char *string)
    } while (ii--);
 }
 
+
+void telescope_to_tempocode(char *inname, char *outname, char*obscode)
+// Return the 2 character TEMPO string for an observatory
+// whose name is in the string "inname".  Return a nice
+// name in "outname".
+{
+    char scope[40];
+    
+    strncpy(scope, inname, 40);
+    strlower(scope);
+    if (strcmp(scope, "gbt") == 0) {
+        strcpy(obscode, "GB");
+        strcpy(outname, "GBT");
+    } else if (strcmp(scope, "arecibo") == 0) {
+        strcpy(obscode, "AO");
+        strcpy(outname, "Arecibo");
+    } else if (strcmp(scope, "vla") == 0) {
+        strcpy(obscode, "VL");
+        strcpy(outname, "VLA");
+    } else if (strcmp(scope, "parkes") == 0) {
+        strcpy(obscode, "PK");
+        strcpy(outname, "Parkes");
+    } else if (strcmp(scope, "jodrell") == 0) {
+        strcpy(obscode, "JB");
+        strcpy(outname, "Jodrell Bank");
+    } else if ((strcmp(scope, "gb43m") == 0) ||
+               (strcmp(scope, "gb 140ft") == 0)){
+        strcpy(obscode, "G1");
+        strcpy(outname, "GB43m");
+    } else if (strcmp(scope, "nancay") == 0) {
+        strcpy(obscode, "NC");
+        strcpy(outname, "Nancay");
+    } else if (strcmp(scope, "effelsberg") == 0) {
+        strcpy(obscode, "EF");
+        strcpy(outname, "Effelsberg");
+    } else if (strcmp(scope, "wsrt") == 0) {
+        strcpy(obscode, "WT");
+        strcpy(outname, "WSRT");
+    } else if (strcmp(scope, "gmrt") == 0) {
+        strcpy(obscode, "GM");
+        strcpy(outname, "GMRT");
+    } else if (strcmp(scope, "lofar") == 0 ) {
+      strcpy(obscode, "LF");
+      strcpy(outname, "LOFAR");
+    } else if (strcmp(scope, "geocenter") == 0) {
+        strcpy(obscode, "EC");
+        strcpy(outname, "Geocenter");
+    } else {
+        printf("\nWARNING!!!:  I don't recognize the observatory (%s)!\n",
+               inname);
+        printf("                 Defaulting to the Geocenter for TEMPO.\n");
+        strcpy(obscode, "EC");
+        strcpy(outname, "Unknown");
+    }
+}
+
+
+float invsqrt(float x)
+// See http://en.wikipedia.org/wiki/Fast_inverse_square_root
+{
+    union {
+        float f;
+        int i;
+    } tmp;
+    tmp.f = x;
+    tmp.i = 0x5f3759df - (tmp.i >> 1);
+    float y = tmp.f;
+    return y * (1.5f - 0.5f * x * y * y);
+}
+
+
 long long next2_to_n(long long x)
 /* Return the first value of 2^n >= x */
 {
@@ -243,7 +314,7 @@ void rotate_1d(float *data, long numbins, long bins_to_left)
    memcpy(tmp, data, sizeof(float) * bins_to_left);
    memmove(data, data + bins_to_left, sizeof(float) * (numbins - bins_to_left));
    memcpy(data + bins_to_left, tmp, sizeof(float) * bins_to_left);
-   free(tmp);
+   vect_free(tmp);
 }
 
 
@@ -264,7 +335,7 @@ void drotate_1d(double *data, long numbins, long bins_to_left)
    memcpy(tmp, data, sizeof(double) * bins_to_left);
    memmove(data, data + bins_to_left, sizeof(double) * (numbins - bins_to_left));
    memcpy(data + bins_to_left, tmp, sizeof(double) * bins_to_left);
-   free(tmp);
+   vect_free(tmp);
 }
 
 
@@ -287,7 +358,7 @@ void frotate(float *data, long numbins, float bins_to_left)
       tmp[i] = hipart * data[(index + i) % numbins] +
           lopart * data[(index + i + 1) % numbins];
    memcpy(data, tmp, sizeof(float) * numbins);
-   free(tmp);
+   vect_free(tmp);
 }
 
 
@@ -309,7 +380,7 @@ void drotate(double *data, long numbins, double bins_to_left)
       tmp[i] = hipart * data[(index + i) % numbins] +
           lopart * data[(index + i + 1) % numbins];
    memcpy(data, tmp, sizeof(double) * numbins);
-   free(tmp);
+   vect_free(tmp);
 }
 
 

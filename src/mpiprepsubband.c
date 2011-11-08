@@ -16,7 +16,7 @@
 #define RAWDATA (cmd->pkmbP || cmd->bcpmP || cmd->wappP || cmd->gmrtP || cmd->spigotP || cmd->filterbankP || cmd->psrfitsP)
 
 /* This causes the barycentric motion to be calculated once per TDT sec */
-#define TDT 10.0
+#define TDT 20.0
 
 /* Simple linear interpolation macro */
 #define LININTERP(X, xlo, xhi, ylo, yhi) ((ylo)+((X)-(xlo))*((yhi)-(ylo))/((xhi)-(xlo)))
@@ -58,14 +58,14 @@ extern void set_WAPP_static(int ptsperblk, int bytesperpt, int bytesperblk,
 extern void get_GMRT_static(int *bytesperpt, int *bytesperblk, float *clip_sigma);
 extern void set_GMRT_static(int ptsperblk, int bytesperpt, int bytesperblk,
                             int numchan, float clip_sigma, double dt);
-extern void get_filterbank_static(int *bytesperpt, int *bytesperblk,
-                                  float *clip_sigma);
-extern void set_filterbank_static(int ptsperblk, int bytesperpt,
-                                  int bytesperblk, int numchan,
-                                  float clip_sigma, double dt);
-
+extern void get_filterbank_static(int *ptsperbyte, int *bytesperpt,
+                                  int *bytesperblk, float *clip_sigma);
+extern void set_filterbank_static(int ptsperbyte, int ptsperblk,
+                                  int bytesperpt, int bytesperblk,
+                                  int numchan, float clip_sigma, double dt);
 static int get_data(FILE * infiles[], int numfiles, float **outdata,
-                    mask * obsmask, double *dispdts, int **offsets, int *padding);
+                    mask * obsmask, float *padvals, double dt,
+                    double *dispdts, int **offsets, int *padding);
 
 MPI_Datatype infodata_type;
 MPI_Datatype maskbase_type;
@@ -109,9 +109,13 @@ int main(int argc, char *argv[])
    {
       FILE *hostfile;
       char tmpname[100];
+      int retval;
 
       hostfile = chkfopen("/etc/hostname", "r");
-      fscanf(hostfile, "%s\n", tmpname);
+      retval = fscanf(hostfile, "%s\n", tmpname);
+      if (retval==0) {
+          printf("Warning:  error reading /etc/hostname on proc %d\n", myid);
+      }
       hostname = (char *) calloc(strlen(tmpname) + 1, 1);
       memcpy(hostname, tmpname, strlen(tmpname));
       fclose(hostfile);
@@ -329,7 +333,7 @@ int main(int argc, char *argv[])
    {
       float clip_sigma = 0.0;
       double dt, T;
-      int ptsperblk, bytesperpt, numifs = 0, decreasing_freqs = 1;
+      int ptsperbyte, ptsperblk, bytesperpt, numifs = 0, decreasing_freqs = 1;
       int chan_mapping[2 * MAXNUMCHAN];
       long long N;
 
@@ -366,22 +370,6 @@ int main(int argc, char *argv[])
             ptsperblk = SUBSBLOCKLEN;
             bytesperpt = sizeof(short); /* Subbands are shorts */
             bytesperblk = cmd->nsub * bytesperpt * ptsperblk;
-            /* What telescope are we using? */
-            if (!strcmp(idata.telescope, "Arecibo")) {
-               strcpy(obs, "AO");
-            } else if (!strcmp(idata.telescope, "Parkes")) {
-               strcpy(obs, "PK");
-            } else if (!strcmp(idata.telescope, "Jodrell")) {
-               strcpy(obs, "JB");
-            } else if (!strcmp(idata.telescope, "GBT")) {
-               strcpy(obs, "GB");
-            } else if (!strcmp(idata.telescope, "GMRT")) {
-               strcpy(obs, "GM");
-            } else {
-               printf("\nYou need to choose a telescope whose data is in\n");
-               printf("$TEMPO/obsys.dat.  Exiting.\n\n");
-               exit(1);
-            }
          }
 
          /* Set-up values if we are using the Parkes multibeam */
@@ -397,16 +385,6 @@ int main(int argc, char *argv[])
             rewind(infiles[0]);
             PKMB_hdr_to_inf(&hdr, &idata);
             PKMB_update_infodata(numinfiles, &idata);
-            /* OBS code for TEMPO */
-            if (!strcmp(idata.telescope, "Parkes"))
-               strcpy(obs, "PK");
-            else if (!strcmp(idata.telescope, "Jodrell"))
-               strcpy(obs, "JB");
-            else {
-               printf
-                   ("\nWARNING!!!:  I don't recognize the observatory (%s)!",
-                    idata.telescope);
-            }
          }
 
          /* Set-up values if we are using the GMRT Phased Array system */
@@ -420,8 +398,6 @@ int main(int argc, char *argv[])
             GMRT_hdr_to_inf(argv[1], &idata);
             GMRT_update_infodata(numinfiles, &idata);
             set_GMRT_padvals(padvals, good_padvals);
-            /* OBS code for TEMPO for the GMRT */
-            strcpy(obs, "GM");
          }
 
          /* Set-up values if we are using SIGPROC filterbank-style data */
@@ -438,25 +414,9 @@ int main(int argc, char *argv[])
             printf("\nSIGPROC filterbank input file information:\n");
             get_filterbank_file_info(infiles, numinfiles, cmd->clip,
                                      &N, &ptsperblk, &numchan, &dt, &T, 1);
-            get_filterbank_static(&bytesperpt, &bytesperblk, &clip_sigma);
+            get_filterbank_static(&ptsperbyte, &bytesperpt, &bytesperblk, &clip_sigma);
             filterbank_update_infodata(numinfiles, &idata);
             set_filterbank_padvals(padvals, good_padvals);
-            /* What telescope are we using? */
-            if (!strcmp(idata.telescope, "Arecibo")) {
-               strcpy(obs, "AO");
-            } else if (!strcmp(idata.telescope, "Parkes")) {
-               strcpy(obs, "PK");
-            } else if (!strcmp(idata.telescope, "Jodrell")) {
-               strcpy(obs, "JB");
-            } else if (!strcmp(idata.telescope, "Effelsberg")) {
-               strcpy(obs, "EF");
-            } else if (!strcmp(idata.telescope, "GBT")) {
-               strcpy(obs, "GB");
-            } else {
-               printf("\nYou need to choose a telescope whose data is in\n");
-               printf("$TEMPO/obsys.dat.  Exiting.\n\n");
-               exit(1);
-            }
          }
 
          /* Set-up values if we are using the Berkeley-Caltech */
@@ -470,8 +430,6 @@ int main(int argc, char *argv[])
                             chan_mapping, &clip_sigma);
             BPP_update_infodata(numinfiles, &idata);
             set_BPP_padvals(padvals, good_padvals);
-            /* OBS code for TEMPO for the GBT */
-            strcpy(obs, "GB");
          }
 
          /* Set-up values if we are using the NRAO-Caltech Spigot card */
@@ -489,8 +447,6 @@ int main(int argc, char *argv[])
             get_SPIGOT_static(&bytesperpt, &bytesperblk, &numifs, &clip_sigma);
             SPIGOT_update_infodata(numinfiles, &idata);
             set_SPIGOT_padvals(padvals, good_padvals);
-            /* OBS code for TEMPO for the GBT */
-            strcpy(obs, "GB");
             free(spigots);
          }
 
@@ -498,9 +454,12 @@ int main(int argc, char *argv[])
 
          if (cmd->psrfitsP) {
             struct spectra_info s;
-            char scope[40];
          
             printf("PSRFITS input file information:\n");
+            // -1 causes the data to determine if we use weights, scales, & offsets
+            s.apply_weight = (cmd->noweightsP) ? 0 : -1;
+            s.apply_scale  = (cmd->noscalesP) ? 0 : -1;
+            s.apply_offset = (cmd->nooffsetsP) ? 0 : -1;
             read_PSRFITS_files(cmd->argv, cmd->argc, &s);
             N = s.N;
             ptsperblk = s.spectra_per_subint;
@@ -512,21 +471,6 @@ int main(int argc, char *argv[])
             get_PSRFITS_static(&bytesperpt, &bytesperblk, &numifs, &clip_sigma);
             PSRFITS_update_infodata(&idata);
             set_PSRFITS_padvals(padvals, good_padvals);
-            strncpy(scope, idata.telescope, 40);
-            strlower(scope);
-            /* OBS codes for TEMPO */
-            if (!strcmp(scope, "parkes")) {
-               strcpy(obs, "PK");
-            } else if (!strcmp(scope, "jodrell")) {
-               strcpy(obs, "JB");
-            } else if (!strcmp(scope, "gbt")) {
-               strcpy(obs, "GB");
-            } else if (!strcmp(scope, "arecibo")) {
-               strcpy(obs, "AO");
-            } else {
-               printf("\nWARNING!!!:  I don't recognize the observatory (%s)!",
-                      idata.telescope);
-            }
          }
 
          /* Set-up values if we are using the Arecobo WAPP */
@@ -539,13 +483,20 @@ int main(int argc, char *argv[])
             get_WAPP_static(&bytesperpt, &bytesperblk, &numifs, &clip_sigma);
             WAPP_update_infodata(numinfiles, &idata);
             set_WAPP_padvals(padvals, good_padvals);
-            strcpy(obs, "AO");  /* OBS code for TEMPO */
          }
 
          /* The number of topo to bary time points to generate with TEMPO */
          numbarypts = (int) (T * 1.1 / TDT + 5.5) + 1;
+
+         // Identify the TEMPO observatory code
+         {
+             char *outscope = (char *) calloc(40, sizeof(char));
+             telescope_to_tempocode(idata.telescope, outscope, obs);
+             free(outscope);
+         }
       }
 
+      MPI_Bcast(&ptsperbyte, 1, MPI_INT, 0, MPI_COMM_WORLD);
       MPI_Bcast(&ptsperblk, 1, MPI_INT, 0, MPI_COMM_WORLD);
       MPI_Bcast(&bytesperpt, 1, MPI_INT, 0, MPI_COMM_WORLD);
       MPI_Bcast(&bytesperblk, 1, MPI_INT, 0, MPI_COMM_WORLD);
@@ -572,7 +523,7 @@ int main(int argc, char *argv[])
             set_GMRT_padvals(padvals, good_padvals);
          }
          if (cmd->filterbankP) {
-            set_filterbank_static(ptsperblk, bytesperpt, bytesperblk,
+            set_filterbank_static(ptsperbyte, ptsperblk, bytesperpt, bytesperblk,
                                   numchan, clip_sigma, dt);
             set_filterbank_padvals(padvals, good_padvals);
          }
@@ -597,8 +548,6 @@ int main(int argc, char *argv[])
             set_WAPP_padvals(padvals, good_padvals);
          }
       }
-      if (cmd->maskfileP)
-         free(padvals);
 
       /* Which IFs will we use? */
       if (cmd->ifsP) {
@@ -672,7 +621,7 @@ int main(int argc, char *argv[])
          dtmp = subdispdt[cmd->nsub - 1];
          for (jj = 0; jj < cmd->nsub; jj++)
             offsets[ii][jj] = (int) ((subdispdt[jj] - dtmp) / dsdt + 0.5);
-         free(subdispdt);
+         vect_free(subdispdt);
       }
 
       /* Allocate our data array and start getting data */
@@ -712,7 +661,8 @@ int main(int argc, char *argv[])
 
       outdata = gen_fmatrix(local_numdms, worklen / cmd->downsamp);
       numread = get_data(infiles, numinfiles, outdata,
-                         &obsmask, dispdt, offsets, &padding);
+                         &obsmask, padvals, idata.dt,
+                         dispdt, offsets, &padding);
 
       while (numread == worklen) {
 
@@ -743,7 +693,8 @@ int main(int argc, char *argv[])
             break;
 
          numread = get_data(infiles, numinfiles, outdata,
-                            &obsmask, dispdt, offsets, &padding);
+                            &obsmask, padvals, idata.dt,
+                            dispdt, offsets, &padding);
       }
       datawrote = totwrote;
 
@@ -784,7 +735,7 @@ int main(int argc, char *argv[])
             avgvoverc += voverc[ii];
          }
          avgvoverc /= numbarypts;
-         free(voverc);
+         vect_free(voverc);
 
          printf("   Average topocentric velocity (c) = %.7g\n", avgvoverc);
          printf("   Maximum topocentric velocity (c) = %.7g\n", maxvoverc);
@@ -844,7 +795,7 @@ int main(int argc, char *argv[])
          dtmp = subdispdt[cmd->nsub - 1];
          for (jj = 0; jj < cmd->nsub; jj++)
             offsets[ii][jj] = (int) ((subdispdt[jj] - dtmp) / dsdt + 0.5);
-         free(subdispdt);
+         vect_free(subdispdt);
       }
 
       /* Convert the bary TOAs to differences from the topo TOAs in */
@@ -854,8 +805,8 @@ int main(int argc, char *argv[])
       for (ii = 0; ii < numbarypts; ii++)
          btoa[ii] = ((btoa[ii] - ttoa[ii]) - dtmp) * SECPERDAY / dsdt;
 
-      {                         /* Find the points where we need to add or remove bins */
-
+      /* Find the points where we need to add or remove bins */
+      {
          int oldbin = 0, currentbin;
          double lobin, hibin, calcpt;
 
@@ -886,7 +837,7 @@ int main(int argc, char *argv[])
                oldbin = currentbin;
             }
          }
-         *diffbinptr = INT_MAX; /* Used as a marker */
+         *diffbinptr = cmd->numout; /* Used as a marker */
       }
       diffbinptr = diffbins;
 
@@ -894,7 +845,8 @@ int main(int argc, char *argv[])
 
       outdata = gen_fmatrix(local_numdms, worklen / cmd->downsamp);
       numread = get_data(infiles, numinfiles, outdata,
-                         &obsmask, dispdt, offsets, &padding);
+                         &obsmask, padvals, idata.dt,
+                         dispdt, offsets, &padding);
 
       while (numread == worklen) {      /* Loop to read and write the data */
          int numwritten = 0;
@@ -934,7 +886,8 @@ int main(int argc, char *argv[])
 
             skip = numtowrite;
 
-            do {                /* Write the rest of the data after adding/removing a bin  */
+            /* Write the rest of the data after adding/removing a bin  */
+            do {
 
                if (*diffbinptr > 0) {
                   /* Add a bin */
@@ -986,7 +939,8 @@ int main(int argc, char *argv[])
             break;
 
          numread = get_data(infiles, numinfiles, outdata,
-                            &obsmask, dispdt, offsets, &padding);
+                            &obsmask, padvals, idata.dt,
+                            dispdt, offsets, &padding);
       }
    }
 
@@ -1020,7 +974,7 @@ int main(int argc, char *argv[])
 
       /* Set the padded points equal to the average data point */
 
-      if (idata.numonoff > 1) {
+      if (idata.numonoff >= 1) {
          int index, startpad, endpad;
 
          for (ii = 0; ii < local_numdms; ii++) {
@@ -1079,20 +1033,20 @@ int main(int argc, char *argv[])
          fclose(outfiles[ii]);
       free(outfiles);
    }
-   free(outdata[0]);
-   free(outdata);
-   free(dms);
+   vect_free(outdata[0]);
+   vect_free(outdata);
+   vect_free(dms);
    free(hostname);
-   free(dispdt);
-   free(offsets[0]);
-   free(offsets);
+   vect_free(dispdt);
+   vect_free(offsets[0]);
+   vect_free(offsets);
    free(datafilenm);
    free(outfilenm);
    free(outpath);
    if (!cmd->nobaryP) {
-      free(btoa);
-      free(ttoa);
-      free(diffbins);
+      vect_free(btoa);
+      vect_free(ttoa);
+      vect_free(diffbins);
    }
    MPI_Finalize();
    return (0);
@@ -1103,41 +1057,108 @@ static int read_subbands(FILE * infiles[], int numfiles, short *subbanddata)
 /* Read short int subband data written by prepsubband */
 {
    int ii, jj, index, numread = 0;
+   double run_avg;
 
    for (ii = 0; ii < numfiles; ii++) {
       index = ii * SUBSBLOCKLEN;
       numread = chkfread(subbanddata + index, sizeof(short),
                          SUBSBLOCKLEN, infiles[ii]);
+
+      if (cmd->runavgP==1) {
+          run_avg = 0.0;
+          for(jj = 0; jj < numread; jj++)
+              run_avg += (float) subbanddata[jj+index];
+          run_avg /= numread;
+          for(jj = 0; jj < numread; jj++)
+              subbanddata[jj+index] = (float) subbanddata[jj+index] - run_avg;
+      }
+
       for (jj = numread; jj < SUBSBLOCKLEN; jj++)
          subbanddata[index + jj] = 0.0;
    }
    return numread;
 }
 
-
-static void convert_subbands(int numfiles, short *shortdata, float *floatdata)
-/* Convert and transpose the subband data */
+static void convert_subbands(int numfiles, short *shortdata,
+                             float *subbanddata, double timeperblk,
+                             int *maskchans, int *nummasked, mask * obsmask,
+                             float clip_sigma, float *padvals)
+/* Convert and transpose the subband data, then mask it*/
 {
-   int ii, jj, index, shortindex;
+   int ii, jj, index, shortindex, offset, channum, mask = 0;
+   double starttime;
+   float subband_sum;
+   static int currentblock = 0;
+
+   *nummasked = 0;
+   if (obsmask->numchan) mask = 1;
 
    for (ii = 0; ii < numfiles; ii++) {
       shortindex = ii * SUBSBLOCKLEN;
       for (jj = 0, index = ii; jj < SUBSBLOCKLEN; jj++, index += numfiles)
-         floatdata[index] = (float) shortdata[shortindex + jj];
+         subbanddata[index] = (float) shortdata[shortindex + jj];
    }
+
+   if (mask) {
+     starttime = currentblock * timeperblk;
+     *nummasked = check_mask(starttime, timeperblk, obsmask, maskchans);
+   }
+
+   /* Clip nasty RFI if requested and we're not masking all the channels*/
+   if ((clip_sigma > 0.0) && !(mask && (*nummasked == -1))){
+     subs_clip_times(subbanddata, SUBSBLOCKLEN, numfiles, clip_sigma, padvals);
+   }
+
+   /* Mask it if required */
+   if (mask) {
+       fflush(stdout);
+       if (*nummasked == -1) {   /* If all channels are masked */
+           for (ii = 0; ii < SUBSBLOCKLEN; ii++)
+               memcpy(subbanddata + ii * numfiles, padvals, sizeof(float) * numfiles);
+           fflush(stdout);
+       } else if (*nummasked > 0) {      /* Only some of the channels are masked */
+           for (ii = 0; ii < SUBSBLOCKLEN; ii++) {
+               offset = ii * numfiles;
+               for (jj = 0; jj < *nummasked; jj++) {
+                   channum = maskchans[jj];
+                   subbanddata[offset + channum] = padvals[channum];
+               }
+           }
+       }
+   }
+
+   /* Zero-DM removal if required */
+   if (cmd->zerodmP==1) {
+       for (ii = 0; ii < SUBSBLOCKLEN; ii++) {
+           offset = ii * numfiles;
+           subband_sum = 0.0;
+           for (jj = offset; jj < offset+numfiles; jj++) {
+               subband_sum += subbanddata[jj];
+           }
+           subband_sum /= (float) numfiles;
+           /* Remove the channel average */
+           for (jj = offset; jj < offset+numfiles; jj++) {
+               subbanddata[jj] -= subband_sum;
+           }
+       }
+   }
+
+   currentblock += 1;
 }
 
 
 static int get_data(FILE * infiles[], int numfiles, float **outdata,
-                    mask * obsmask, double *dispdts, int **offsets, int *padding)
+                    mask * obsmask, float *padvals, double dt,
+                    double *dispdts, int **offsets, int *padding)
 {
    static int firsttime = 1, worklen, *maskchans = NULL, blocksize;
    static int dsworklen;
    static float *tempzz, *data1, *data2, *dsdata1 = NULL, *dsdata2 = NULL;
    static float *currentdata, *lastdata, *currentdsdata, *lastdsdata;
+   static double blockdt;
    static unsigned char *rawdata = NULL;
-   int totnumread = 0, numread = 0, tmpnumread = 0, ii, jj, tmppad =
-       0, nummasked = 0;
+   int totnumread = 0, numread = 0, tmpnumread = 0;
+   int ii, jj, tmppad = 0, nummasked = 0;
 
    if (firsttime) {
       /* For rawdata, we need to make two initial reads in order to        */
@@ -1149,6 +1170,7 @@ static int get_data(FILE * infiles[], int numfiles, float **outdata,
       worklen = blocklen * blocksperread;
       dsworklen = worklen / cmd->downsamp;
       blocksize = blocklen * cmd->nsub;
+      blockdt = blocklen * dt;
       data1 = gen_fvect(cmd->nsub * worklen);
       data2 = gen_fvect(cmd->nsub * worklen);
       rawdata = gen_bvect(bytesperblk);
@@ -1265,11 +1287,14 @@ static int get_data(FILE * infiles[], int numfiles, float **outdata,
             MPI_Bcast(&numread, 1, MPI_INT, 0, MPI_COMM_WORLD);
             MPI_Bcast(subsdata, SUBSBLOCKLEN * numfiles, MPI_SHORT, 0,
                       MPI_COMM_WORLD);
-            convert_subbands(numfiles, subsdata, currentdata + ii * blocksize);
+            convert_subbands(numfiles, subsdata,
+                             currentdata + ii * blocksize, blockdt,
+                             maskchans, &nummasked, obsmask,
+                             cmd->clip, padvals);
             if (!firsttime)
                totnumread += numread;
          }
-         free(subsdata);
+         vect_free(subsdata);
       }
       /* Downsample the subband data if needed */
       if (myid > 0) {
@@ -1316,14 +1341,16 @@ static int get_data(FILE * infiles[], int numfiles, float **outdata,
       }
       } */
    if (totnumread != worklen) {
-      if (cmd->maskfileP)
-         free(maskchans);
-      free(data1);
-      free(data2);
-      free(rawdata);
+     if (cmd->maskfileP) {
+       vect_free(maskchans);
+       vect_free(padvals);
+     }
+      vect_free(data1);
+      vect_free(data2);
+      vect_free(rawdata);
       if (cmd->downsamp > 1) {
-         free(dsdata1);
-         free(dsdata2);
+         vect_free(dsdata1);
+         vect_free(dsdata2);
       }
    }
    return totnumread;

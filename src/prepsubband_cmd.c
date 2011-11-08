@@ -38,6 +38,12 @@ static Cmdline cmd = {
   /* filterbankP = */ 0,
   /***** -psrfits: Raw data in PSRFITS format */
   /* psrfitsP = */ 0,
+  /***** -noweights: Do not apply PSRFITS weights */
+  /* noweightsP = */ 0,
+  /***** -noscales: Do not apply PSRFITS scales */
+  /* noscalesP = */ 0,
+  /***** -nooffsets: Do not apply PSRFITS offsets */
+  /* nooffsetsP = */ 0,
   /***** -wapp: Raw data in Wideband Arecibo Pulsar Processor (WAPP) format */
   /* wappP = */ 0,
   /***** -window: Window correlator lags with a Hamming window before FFTing */
@@ -56,6 +62,8 @@ static Cmdline cmd = {
   /* clipC = */ 1,
   /***** -noclip: Do not clip the data.  (The default is to _always_ clip!) */
   /* noclipP = */ 0,
+  /***** -runavg: Running mean subtraction from the input data */
+  /* runavgP = */ 0,
   /***** -sub: Write subbands instead of de-dispersed data */
   /* subP = */ 0,
   /***** -subdm: The DM to use when de-dispersing subbands for -sub */
@@ -859,6 +867,27 @@ showOptionValues(void)
     printf("-psrfits found:\n");
   }
 
+  /***** -noweights: Do not apply PSRFITS weights */
+  if( !cmd.noweightsP ) {
+    printf("-noweights not found.\n");
+  } else {
+    printf("-noweights found:\n");
+  }
+
+  /***** -noscales: Do not apply PSRFITS scales */
+  if( !cmd.noscalesP ) {
+    printf("-noscales not found.\n");
+  } else {
+    printf("-noscales found:\n");
+  }
+
+  /***** -nooffsets: Do not apply PSRFITS offsets */
+  if( !cmd.nooffsetsP ) {
+    printf("-nooffsets not found.\n");
+  } else {
+    printf("-nooffsets found:\n");
+  }
+
   /***** -wapp: Raw data in Wideband Arecibo Pulsar Processor (WAPP) format */
   if( !cmd.wappP ) {
     printf("-wapp not found.\n");
@@ -914,6 +943,13 @@ showOptionValues(void)
     printf("-noclip not found.\n");
   } else {
     printf("-noclip found:\n");
+  }
+
+  /***** -runavg: Running mean subtraction from the input data */
+  if( !cmd.runavgP ) {
+    printf("-runavg not found.\n");
+  } else {
+    printf("-runavg found:\n");
   }
 
   /***** -sub: Write subbands instead of de-dispersed data */
@@ -1047,7 +1083,7 @@ showOptionValues(void)
 void
 usage(void)
 {
-  fprintf(stderr,"%s","   -o outfile [-pkmb] [-gmrt] [-bcpm] [-spigot] [-filterbank] [-psrfits] [-wapp] [-window] [-numwapps numwapps] [-if ifs] [-clip clip] [-noclip] [-sub] [-subdm subdm] [-numout numout] [-nobary] [-DE405] [-lodm lodm] [-dmstep dmstep] [-numdms numdms] [-nsub nsub] [-downsamp downsamp] [-mask maskfile] [--] infile ...\n");
+  fprintf(stderr,"%s","   -o outfile [-pkmb] [-gmrt] [-bcpm] [-spigot] [-filterbank] [-psrfits] [-noweights] [-noscales] [-nooffsets] [-wapp] [-window] [-numwapps numwapps] [-if ifs] [-clip clip] [-noclip] [-runavg] [-sub] [-subdm subdm] [-numout numout] [-nobary] [-DE405] [-lodm lodm] [-dmstep dmstep] [-numdms numdms] [-nsub nsub] [-downsamp downsamp] [-mask maskfile] [--] infile ...\n");
   fprintf(stderr,"%s","      Converts a raw radio data file into many de-dispersed time-series (including barycentering).\n");
   fprintf(stderr,"%s","             -o: Root of the output file names\n");
   fprintf(stderr,"%s","                 1 char* value\n");
@@ -1057,6 +1093,9 @@ usage(void)
   fprintf(stderr,"%s","        -spigot: Raw data in Caltech-NRAO Spigot Card format\n");
   fprintf(stderr,"%s","    -filterbank: Raw data in SIGPROC filterbank format\n");
   fprintf(stderr,"%s","       -psrfits: Raw data in PSRFITS format\n");
+  fprintf(stderr,"%s","     -noweights: Do not apply PSRFITS weights\n");
+  fprintf(stderr,"%s","      -noscales: Do not apply PSRFITS scales\n");
+  fprintf(stderr,"%s","     -nooffsets: Do not apply PSRFITS offsets\n");
   fprintf(stderr,"%s","          -wapp: Raw data in Wideband Arecibo Pulsar Processor (WAPP) format\n");
   fprintf(stderr,"%s","        -window: Window correlator lags with a Hamming window before FFTing\n");
   fprintf(stderr,"%s","      -numwapps: Number of WAPPs used with contiguous frequencies\n");
@@ -1068,6 +1107,7 @@ usage(void)
   fprintf(stderr,"%s","                 1 float value between 0 and 1000.0\n");
   fprintf(stderr,"%s","                 default: `6.0'\n");
   fprintf(stderr,"%s","        -noclip: Do not clip the data.  (The default is to _always_ clip!)\n");
+  fprintf(stderr,"%s","        -runavg: Running mean subtraction from the input data\n");
   fprintf(stderr,"%s","           -sub: Write subbands instead of de-dispersed data\n");
   fprintf(stderr,"%s","         -subdm: The DM to use when de-dispersing subbands for -sub\n");
   fprintf(stderr,"%s","                 1 double value between 0 and 4000.0\n");
@@ -1094,8 +1134,8 @@ usage(void)
   fprintf(stderr,"%s","          -mask: File containing masking information to use\n");
   fprintf(stderr,"%s","                 1 char* value\n");
   fprintf(stderr,"%s","         infile: Input data file name.  If the data is not in a known raw format, it should be a single channel of single-precision floating point data.  In this case a '.inf' file with the same root filename must also exist (Note that this means that the input data file must have a suffix that starts with a period)\n");
-  fprintf(stderr,"%s","                 1...1024 values\n");
-  fprintf(stderr,"%s","  version: 20Jul08\n");
+  fprintf(stderr,"%s","                 1...16384 values\n");
+  fprintf(stderr,"%s","  version: 14Oct11\n");
   fprintf(stderr,"%s","  ");
   exit(EXIT_FAILURE);
 }
@@ -1152,6 +1192,21 @@ parseCmdline(int argc, char **argv)
       continue;
     }
 
+    if( 0==strcmp("-noweights", argv[i]) ) {
+      cmd.noweightsP = 1;
+      continue;
+    }
+
+    if( 0==strcmp("-noscales", argv[i]) ) {
+      cmd.noscalesP = 1;
+      continue;
+    }
+
+    if( 0==strcmp("-nooffsets", argv[i]) ) {
+      cmd.nooffsetsP = 1;
+      continue;
+    }
+
     if( 0==strcmp("-wapp", argv[i]) ) {
       cmd.wappP = 1;
       continue;
@@ -1194,6 +1249,11 @@ parseCmdline(int argc, char **argv)
 
     if( 0==strcmp("-noclip", argv[i]) ) {
       cmd.noclipP = 1;
+      continue;
+    }
+
+    if( 0==strcmp("-runavg", argv[i]) ) {
+      cmd.runavgP = 1;
       continue;
     }
 
@@ -1311,8 +1371,8 @@ parseCmdline(int argc, char **argv)
             Program);
     exit(EXIT_FAILURE);
   }
-  if( 1024<cmd.argc ) {
-    fprintf(stderr, "%s: there should be at most 1024 non-option argument(s)\n",
+  if( 16384<cmd.argc ) {
+    fprintf(stderr, "%s: there should be at most 16384 non-option argument(s)\n",
             Program);
     exit(EXIT_FAILURE);
   }

@@ -463,6 +463,10 @@ int main(int argc, char *argv[])
          struct spectra_info s;
          
          printf("PSRFITS input file information:\n");
+          // -1 causes the data to determine if we use weights, scales, & offsets
+         s.apply_weight = (cmd->noweightsP) ? 0 : -1;
+         s.apply_scale  = (cmd->noscalesP) ? 0 : -1;
+         s.apply_offset = (cmd->nooffsetsP) ? 0 : -1;
          read_PSRFITS_files(cmd->argv, cmd->argc, &s);
          local_N = s.N;
          ptsperrec = s.spectra_per_subint;
@@ -521,55 +525,9 @@ int main(int argc, char *argv[])
 
       }
 
-      { // Set the correct observatory information
-         char scope[40];
-
-         strncpy(scope, idata.telescope, 40);
-         strlower(scope);
-         search.telescope = (char *) calloc(40, sizeof(char));
-
-         if (strcmp(scope, "gbt") == 0) {
-             strcpy(obs, "GB");
-             strcpy(search.telescope, "GBT");
-         } else if (strcmp(scope, "arecibo") == 0) {
-             strcpy(obs, "AO");
-             strcpy(search.telescope, "Arecibo");
-         } else if (strcmp(scope, "vla") == 0) {
-             strcpy(obs, "VL");
-             strcpy(search.telescope, "VLA");
-         } else if (strcmp(scope, "parkes") == 0) {
-             strcpy(obs, "PK");
-             strcpy(search.telescope, "Parkes");
-         } else if (strcmp(scope, "jodrell") == 0) {
-             strcpy(obs, "JB");
-             strcpy(search.telescope, "Jodrell Bank");
-         } else if ((strcmp(scope, "gb43m") == 0) ||
-                    (strcmp(scope, "gb 140ft") == 0)){
-             strcpy(obs, "G1");
-             strcpy(search.telescope, "GB43m");
-         } else if (strcmp(scope, "nancay") == 0) {
-             strcpy(obs, "NC");
-             strcpy(search.telescope, "Nancay");
-         } else if (strcmp(scope, "effelsberg") == 0) {
-             strcpy(obs, "EF");
-             strcpy(search.telescope, "Effelsberg");
-         } else if (strcmp(scope, "wsrt") == 0) {
-             strcpy(obs, "WT");
-             strcpy(search.telescope, "WSRT");
-         } else if (strcmp(scope, "gmrt") == 0) {
-             strcpy(obs, "GM");
-             strcpy(search.telescope, "GMRT");
-         } else if (strcmp(scope, "geocenter") == 0) {
-             strcpy(obs, "EC");
-             strcpy(search.telescope, "Geocenter");
-         } else {
-             printf("\nWARNING!!!:  I don't recognize the observatory (%s)!\n",
-                    idata.telescope);
-             printf("                 Defaulting to the Geocenter for TEMPO.\n");
-             strcpy(obs, "EC");
-             strcpy(search.telescope, "Unknown");
-         }
-      }
+      // Identify the TEMPO observatory code
+      search.telescope = (char *) calloc(40, sizeof(char));
+      telescope_to_tempocode(idata.telescope, search.telescope, obs);
 
       idata.dm = cmd->dm;
       numrec = local_N / ptsperrec;
@@ -1266,7 +1224,7 @@ int main(int argc, char *argv[])
          for (ii = 0; ii < numbarypts - 1; ii++)
             search.avgvoverc += voverc[ii];
          search.avgvoverc /= (numbarypts - 1.0);
-         free(voverc);
+         vect_free(voverc);
          printf("The average topocentric velocity is %.6g (units of c).\n\n",
                 search.avgvoverc);
          printf("Barycentric folding frequency    (hz)  =  %-.12g\n", f);
@@ -1481,8 +1439,8 @@ int main(int argc, char *argv[])
          printf("\r  Folded %ld points of %.0f", totnumfolded, N);
          fflush(NULL);
       }
-      free(buffers);
-      free(phasesadded);
+      vect_free(buffers);
+      vect_free(phasesadded);
    }
    /* This resets foldf (which is used below) to the original value */
    if (cmd->polycofileP)
@@ -1571,6 +1529,8 @@ int main(int argc, char *argv[])
 
       {                         /* Do the optimization */
          int numdmtrials = 1, numpdds = 1, lodmnum = 0;
+         int totnumtrials, currtrial = 0;
+         int oldper = -1, newper = 0;
          int idm, ip, ipd, ipdd, bestidm = 0, bestip = 0, bestipd = 0, bestipdd = 0;
          double lodm = 0.0, ddm = 0.0;
          double *delays, *pd_delays, *pdd_delays, *ddprofs = search.rawfolds;
@@ -1643,6 +1603,8 @@ int main(int argc, char *argv[])
             lodmnum = good_idm;
             numdmtrials = lodmnum + 1;
          }
+         /* The total number of search trials */
+         totnumtrials=numdmtrials*numpdds*numtrials*numtrials;
 
          for (idm = lodmnum; idm < numdmtrials; idm++) {        /* Loop over DMs */
             if (cmd->nsub > 1) {        /* This is only for doing DM searches */
@@ -1681,7 +1643,7 @@ int main(int argc, char *argv[])
                      /* Combine the profiles usingthe above computed delays */
                      combine_profs(ddprofs, ddstats, cmd->npart, search.proflen,
                                    delays, currentprof, &currentstats);
-
+                    
                      /* If this is a simple fold, create the chi-square p-pdot plane */
                      if (cmd->nsub == 1 && !cmd->searchpddP)
                         ppdot[ipd * search.numpdots + ip] = currentstats.redchi;
@@ -1701,6 +1663,13 @@ int main(int argc, char *argv[])
                            memcpy(bestprof, currentprof,
                                   sizeof(double) * search.proflen);
                         }
+                     }
+                     currtrial+=1;
+                     newper = (int) ((float) currtrial/totnumtrials*100.0 + 0.5);
+                     if (newper > oldper) {
+                        printf("\r  Amount Complete = %3d%%", newper);
+                        fflush(stdout);
+                        oldper = newper;
                      }
                   }
                }
@@ -1726,17 +1695,17 @@ int main(int argc, char *argv[])
                                                 foldfdd + fdotdots[bestipdd]);
          }
 
-         free(delays);
-         free(pd_delays);
-         free(pdd_delays);
+         vect_free(delays);
+         vect_free(pd_delays);
+         vect_free(pdd_delays);
          if (cmd->nsub > 1) {
-            free(ddprofs);
+            vect_free(ddprofs);
             free(ddstats);
          }
       }
-      free(currentprof);
-      free(fdots);
-      free(fdotdots);
+      vect_free(currentprof);
+      vect_free(fdots);
+      vect_free(fdotdots);
    }
    printf("  Done searching.\n\n");
 
@@ -1876,30 +1845,30 @@ int main(int argc, char *argv[])
    /* Free our memory  */
 
    if (cmd->nsub == 1 && !cmd->searchpddP)
-      free(ppdot);
+      vect_free(ppdot);
    delete_prepfoldinfo(&search);
-   free(data);
+   vect_free(data);
    if (!cmd->outfileP)
       free(rootnm);
    free(outfilenm);
    free(plotfilenm);
-   free(parttimes);
-   free(bestprof);
+   vect_free(parttimes);
+   vect_free(bestprof);
    if (binary) {
-      free(Ep);
-      free(tp);
+      vect_free(Ep);
+      vect_free(tp);
    }
    if (cmd->maskfileP) {
       free_mask(obsmask);
-      free(padvals);
+      vect_free(padvals);
    }
    if (RAWDATA || insubs) {
-      free(barytimes);
-      free(topotimes);
+      vect_free(barytimes);
+      vect_free(topotimes);
    }
    if (!strcmp(idata.band, "Radio")) {
-      free(obsf);
-      free(dispdts);
+      vect_free(obsf);
+      vect_free(dispdts);
    }
    printf("Done.\n\n");
    return (0);

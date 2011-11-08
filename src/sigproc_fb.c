@@ -2,7 +2,7 @@
 #include "mask.h"
 #include "sigproc_fb.h"
 
-#define MAXNUMCHAN 2048
+#define MAXNUMCHAN 8192
 #define BLOCKLEN   512
 
 /* All of the following have an _st to indicate static */
@@ -21,8 +21,9 @@ static int currentfile, currentblock;
 static int bufferpts = 0, padnum = 0, shiftbuffer = 1;
 static float clip_sigma_st = 0.0;
 static int using_MPI = 0;
+static int ptsperbyte_st = 1;
 
-/* Note:  Much of this has been ripped out of SIGPROC v2.8 */
+/* Note:  Much of this has been ripped out of SIGPROC      */
 /* and then slightly modified.  Thanks Dunc!               */
 
 static void send_string(char *string, FILE * outfile)
@@ -116,6 +117,16 @@ static char *telescope_name(int telescope_id)
       strcpy(string, "Effelsberg");
       Tdiam = 100.0;
       break;
+   case 9:
+      strcpy(string, "ATA");
+      break;
+   case 10:
+      strcpy(string, "UTR-2");
+      break;
+   case 11:
+      strcpy(string, "LOFAR");
+      Tdiam = 999.0; // depends on configuration
+      break;
    default:
       strcpy(string, "???????");
       break;
@@ -152,6 +163,9 @@ static char *backend_name(int machine_id)
       break;
    case 7:
       strcpy(string, "SPIGOT");
+      break;
+   case 11:
+      strcpy(string, "BG/P");
       break;
    default:
       strcpy(string, "????");
@@ -241,6 +255,7 @@ int read_filterbank_header(sigprocfb * fb, FILE * inputfile)
    char string[80], message[80];
    int itmp, nbytes = 0, totalbytes;
    int expecting_rawdatafile = 0, expecting_source_name = 0;
+   int barycentric,pulsarcentric;
    /* try to read in the first line of the header */
    get_string(inputfile, &nbytes, string);
    if (!strings_equal(string, "HEADER_START")) {
@@ -300,6 +315,12 @@ int read_filterbank_header(sigprocfb * fb, FILE * inputfile)
       } else if (strings_equal(string, "nbits")) {
          chkfread(&(fb->nbits), sizeof(int), 1, inputfile);
          totalbytes += sizeof(int);
+      } else if (strings_equal(string,"barycentric")) {
+         chkfread(&barycentric,sizeof(int),1,inputfile);
+	 totalbytes+=sizeof(int);
+      } else if (strings_equal(string,"pulsarcentric")) {
+         chkfread(&pulsarcentric,sizeof(int),1,inputfile);
+         totalbytes+=sizeof(int);
       } else if (strings_equal(string, "nsamples")) {
          /* read this one only for backwards compatibility */
          chkfread(&itmp, sizeof(int), 1, inputfile);
@@ -372,15 +393,18 @@ void print_filterbank_header(sigprocfb * fb)
       printf(" Note:  IFs were summed in hardware.\n");
 }
 
-void get_filterbank_static(int *bytesperpt, int *bytesperblk, float *clip_sigma)
+void get_filterbank_static(int *ptsperbyte, int *bytesperpt, 
+                           int *bytesperblk, float *clip_sigma)
 {
+   *ptsperbyte = ptsperbyte_st;
    *bytesperpt = bytesperpt_st;
    *bytesperblk = bytesperblk_st;
    *clip_sigma = clip_sigma_st;
 }
 
 
-void set_filterbank_static(int ptsperblk, int bytesperpt, int bytesperblk,
+void set_filterbank_static(int ptsperbyte, int ptsperblk, 
+                           int bytesperpt, int bytesperblk,
                            int numchan, float clip_sigma, double dt)
 {
    using_MPI = 1;
@@ -388,6 +412,7 @@ void set_filterbank_static(int ptsperblk, int bytesperpt, int bytesperblk,
    ptsperblk_st = ptsperblk;
    bytesperpt_st = bytesperpt;
    bytesperblk_st = bytesperblk;
+   ptsperbyte_st = ptsperbyte;
    numchan_st = numchan;
    sampperblk_st = ptsperblk_st * numchan_st;
    clip_sigma_st = clip_sigma;
@@ -476,13 +501,14 @@ void get_filterbank_file_info(FILE * files[], int numfiles, float clipsig,
 
    /* Now read the first header... */
    headerlen = read_filterbank_header(&(fb_st[0]), files[0]);
-   if (fb_st[0].nbits != 8) {
-      printf("\nThe number of bits per sample (%d) does not equal 8!",
-             fb_st[0].nbits);
-      printf("   Exiting.\n\n");
-      exit(0);
-   } else {
-      bytesperpt_st = 1;
+   if (fb_st[0].nbits == 8) {
+       ptsperbyte_st = 1;
+   } else if (fb_st[0].nbits == 4) {
+       ptsperbyte_st = 2;
+   } else if (fb_st[0].nbits == 2) {
+       ptsperbyte_st = 4;
+   } else if (fb_st[0].nbits == 1) {
+       ptsperbyte_st = 8;
    }
    sigprocfb_to_inf(fb_st + 0, idata_st + 0);
    chkfseek(files[0], fb_st[0].headerlen, SEEK_SET);
@@ -491,7 +517,7 @@ void get_filterbank_file_info(FILE * files[], int numfiles, float clipsig,
    *numchan = numchan_st = idata_st[0].num_chan;
    *ptsperblock = ptsperblk_st = BLOCKLEN;
    sampperblk_st = ptsperblk_st * numchan_st;
-   bytesperblk_st = bytesperpt_st * sampperblk_st;
+   bytesperblk_st = sampperblk_st / ptsperbyte_st;
    numblks_st[0] = chkfilelen(files[0], bytesperblk_st);
    numpts_st[0] = numblks_st[0] * ptsperblk_st;
    N_st = numpts_st[0];
@@ -541,6 +567,7 @@ void get_filterbank_file_info(FILE * files[], int numfiles, float clipsig,
       printf("        Instrument = %s (%d)\n", ctmp, fb_st[0].machine_id);
       free(ctmp);
       printf("   Number of files = %d\n", numfiles);
+      printf("    Bits per point = %d\n", fb_st[0].nbits);
       printf("      Points/block = %d\n", ptsperblk_st);
       printf("   Num of channels = %d\n", numchan_st);
       printf("  Total points (N) = %lld\n", N_st);
@@ -686,6 +713,7 @@ int read_filterbank_rawblock(FILE * infiles[], int numfiles,
          /* Need to add this later */
       }
       convert_filterbank_block(rawdatabuffer, dataptr);
+
       *padding = 0;
       /* Put the new data into the databuffer if needed */
       if (bufferpts)
@@ -850,8 +878,8 @@ int read_filterbank(FILE * infiles[], int numfiles, float *data,
             dedisp(currentdata, lastdata, numpts, numchan_st, dispdelays, data);
          SWAP(currentdata, lastdata);
          if (numread != numblocks) {
-            free(rawdata1);
-            free(rawdata2);
+            vect_free(rawdata1);
+            vect_free(rawdata2);
             allocd = 0;
          }
          if (firsttime)
@@ -1022,18 +1050,56 @@ void convert_filterbank_block(int *indata, unsigned char *outdata)
 {
    int ii, jj, samp_ct, offset;
 
-   if (bytesperpt_st == 1) {
-      unsigned char *chardata = (unsigned char *) indata;
-      for (samp_ct = 0; samp_ct < ptsperblk_st; samp_ct++) {
-         offset = samp_ct * numchan_st;
-         for (ii = 0, jj = numchan_st - 1; ii < numchan_st; ii++, jj--)
-            outdata[ii + offset] = chardata[jj + offset];
-      }
-   } else if (bytesperpt_st == 2) {
-      printf("Can't handle 2-byte data yet!\n");
-   } else if (bytesperpt_st == 4) {
-      printf("Can't handle 4-byte data yet!\n");
+   if (ptsperbyte_st == 1) {
+       unsigned char *chardata = (unsigned char *) indata;
+       for (samp_ct = 0; samp_ct < ptsperblk_st; samp_ct++) {
+           offset = samp_ct * numchan_st;
+           for (ii = 0, jj = numchan_st - 1; ii < numchan_st; ii++, jj--)
+               outdata[ii + offset] = chardata[jj + offset];
+       }
+   } else if (ptsperbyte_st == 2) {
+       unsigned char c, *chardata = (unsigned char *) indata;
+       for (samp_ct = 0; samp_ct < ptsperblk_st; samp_ct++) {
+           offset = samp_ct * numchan_st;
+           for (ii = 0, jj = numchan_st/2 - 1; ii < numchan_st; ii+=2, jj--) {
+               c = chardata[(jj + offset/2)];
+               outdata[(ii+1) + offset] = (unsigned char ) (c & 15);
+               outdata[ii + offset] = (unsigned char ) ( (c & 240) >> 4 );
+           }
+       }
+   } else if (ptsperbyte_st == 4) {
+       unsigned char c, *chardata = (unsigned char *) indata;
+       unsigned char *outdataptr;
+       for (samp_ct = 0; samp_ct < ptsperblk_st; samp_ct++) {
+           offset = samp_ct * numchan_st;
+           outdataptr = outdata + offset;
+           for (ii = 0, jj = numchan_st/4 - 1; ii < numchan_st; ii+=4, jj--) {
+               c = chardata[(jj + offset/4)];
+               *outdataptr++ = (c >> 0x06) & 0x03;
+               *outdataptr++ = (c >> 0x04) & 0x03;
+               *outdataptr++ = (c >> 0x02) & 0x03;
+               *outdataptr++ = c & 0x03;
+           }
+       }
+   } else if (ptsperbyte_st == 8) {
+       unsigned char c, *chardata = (unsigned char *) indata;
+       unsigned char *outdataptr;
+       for (samp_ct = 0; samp_ct < ptsperblk_st; samp_ct++) {
+           offset = samp_ct * numchan_st;
+           outdataptr = outdata + offset;
+           for (ii = 0, jj = numchan_st/8 - 1; ii < numchan_st; ii+=8, jj--) {
+               c = chardata[(jj + offset/8)];
+               *outdataptr++ = (c >> 0x07) & 0x01;
+               *outdataptr++ = (c >> 0x06) & 0x01;
+               *outdataptr++ = (c >> 0x05) & 0x01;
+               *outdataptr++ = (c >> 0x04) & 0x01;
+               *outdataptr++ = (c >> 0x03) & 0x01;
+               *outdataptr++ = (c >> 0x02) & 0x01;
+               *outdataptr++ = (c >> 0x01) & 0x01;
+               *outdataptr++ = c & 0x01;
+           }
+       }
    } else {
-      printf("\nYikes!!! Not supposed to be here in convert_filterbank_block()\n\n");
+       printf("\nYikes!!! Not supposed to be here in convert_filterbank_block()\n\n");
    }
 }

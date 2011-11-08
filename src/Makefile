@@ -3,8 +3,8 @@
 #   by Scott M. Ransom
 
 # OS type
-OS = Linux
-#OS = OSX
+# OS = Linux
+OS = OSX
 
 # Linux is the first choice
 ifeq ($(OS),Linux)
@@ -16,8 +16,8 @@ ifeq ($(OS),Linux)
 else
 	LIBSUFFIX = .dylib
 	LIBCMD = -dynamiclib
-	SYSDIR = /sw
-	LOCDIR = /sw
+	SYSDIR = /opt/local
+	LOCDIR = /opt/local
 endif
 
 # Path to PGPLOT includes
@@ -62,13 +62,13 @@ FC = gfortran
 #FC = g77
 CFLAGS = -I$(PRESTO)/include $(OTHERINCDIR) $(PGPLOTINCDIR) $(FFTINCDIR) \
 	-D$(FFTTYPE) -DUSEMMAP -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64 \
-	-O3 -ffast-math -Wall -W -fPIC
+	-O3 -ffast-math -Wall -W -fPIC -m64
 #	-g -Wall -W
 CLINKFLAGS = $(CFLAGS)
 # NOTE:  Be careful of upping the optimization on the
 #        FFLAGs.  Certain compilers (i.e. on Intel Macs) will
 #        cause errors for the code in least_squares.f
-FFLAGS = -g -fPIC
+FFLAGS = -g -fPIC -m64
 FLINKFLAGS = $(FFLAGS)
 LINKCOMMAND1 = $(CC) $(LIBCMD) -o
 LINKCOMMAND2 = ar rcs

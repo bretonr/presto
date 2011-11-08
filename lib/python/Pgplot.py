@@ -19,6 +19,7 @@
 
 import numpy as Num
 import types, math, ppgplot
+import os
 
 # True if we have an /XWIN or /XSERVE device open yet
 ppgplot_dev_open_ = 0
@@ -27,7 +28,15 @@ ppgplot_dev_open_ = 0
 ppgplot_dev_prep_ = 0
 
 # Default plotting device
-ppgplot_device_ = '/XWIN'
+#ppgplot_device_ = '/XWIN'
+#ppgplot_device_ = '/AQT'
+if os.uname()[0] == 'Linux':
+ ppgplot_device_ = '/XWIN'
+elif os.uname()[0] == 'Darwin':
+ #ppgplot_device_ = '/AQT'
+ ppgplot_device_ = '/XWIN'
+else:
+ ppgplot_device_ = '/XWIN'
 
 # Default font to use
 ppgplot_font_ = 1
@@ -55,14 +64,17 @@ ppgplot_labelmin_ = 20
 
 # Default line colors to use
 ppgplot_color_ = 'white'
+#ppgplot_color_ = 'black'
 
 # Default color palette for IMAG routines
-ppgplot_palette_ = 'rainbow'
+ppgplot_palette_ = 'antirainbow'
 
 # The set of colors for PGPLOT
 ppgplot_colors_ = { \
     'black':0, 'Black':0, 'BLACK':0, \
     'white':1, 'White':1, 'WHITE':1, \
+    #'black':1, 'Black':1, 'BLACK':1, \
+    #'white':0, 'White':0, 'WHITE':0, \
     'red':2, 'Red':2, 'RED':2, \
     'green':3, 'Green':3, 'GREEN':3, \
     'blue':4, 'Blue':4, 'BLUE':4, \
@@ -106,16 +118,18 @@ def resetdefaults():
     ppgplot.pgsls(ppgplot_linestyle_)
     ppgplot.pgslw(ppgplot_linewidth_)
     ppgplot.pgsci(ppgplot_colors_[ppgplot_color_])
+    # My little add-on to switch the background to white
+    reset_colors()
     ppgplot.pgsch(ppgplot_font_size_)
     
 
 # Go to a subsequent plotting page
-def nextplotpage(reset=0):
+def nextplotpage(reset=1):
     """
     nextplotpage():
         Advance the plotting device to a new page.
         The optional entry is:
-            reset: reset defaults or not (default = 0 (no)) 
+            reset: reset defaults or not (default = 1 (yes)) 
     """
     global ppgplot_dev_open_, ppgplot_dev_prep_
     if (ppgplot_dev_open_):
@@ -129,8 +143,10 @@ def nextplotpage(reset=0):
 def reset_colors():
     lo_col_ind, hi_col_ind = ppgplot.pgqcol()
     ppgplot.pgscir(lo_col_ind, hi_col_ind)
-    ppgplot.pgscr( 0, 0.00, 0.00, 0.00) # Black (background)     
-    ppgplot.pgscr( 1, 1.00, 1.00, 1.00) # White (default)        
+    #ppgplot.pgscr( 0, 0.00, 0.00, 0.00) # Black (background)     
+    #ppgplot.pgscr( 1, 1.00, 1.00, 1.00) # White (default)
+    ppgplot.pgscr( 1, 0.00, 0.00, 0.00) # White (background)     
+    ppgplot.pgscr( 0, 1.00, 1.00, 1.00) # Black (default)
     ppgplot.pgscr( 2, 1.00, 0.00, 0.00) # Red                    
     ppgplot.pgscr( 3, 0.00, 1.00, 0.00) # Green                  
     ppgplot.pgscr( 4, 0.00, 0.00, 1.00) # Blue                   
@@ -198,6 +214,11 @@ def prepplot(rangex, rangey, title=None, labx=None, laby=None, \
     # Open the plot device
     if (not ppgplot_dev_open_):
         ppgplot.pgopen(device)
+	# My little add-on to switch the background to white
+	if device == '/XWIN':
+	    reset_colors()
+	if device == '/AQT':
+	    ppgplot.pgsci(0)
         # Let the routines know that we already have a device open
         ppgplot_dev_open_ = 1
         # Set the aspect ratio
@@ -247,6 +268,9 @@ def prepplot(rangex, rangey, title=None, labx=None, laby=None, \
         ppgplot.pgbox("BN"+env+lxenv, 0.0, 0, "BCN"+env+lyenv, 0.0, 0)
     else:
         ppgplot.pgbox("BCN"+env+lxenv, 0.0, 0, "BCN"+env+lyenv, 0.0, 0)
+    # My little add-on to switch the background to white
+    if device == '/AQT' or device == '/XWIN':
+	reset_colors()
     # Add labels
     if not title is None: ppgplot.pgmtxt("T", 3.2, 0.5, 0.5, title)
     ppgplot.pgmtxt("B", 3.0, 0.5, 0.5, labx)
@@ -331,7 +355,7 @@ def plotxy(y, x=None, title=None, rangex=None, rangey=None, \
         else: rangey=scalerange(y)
     # Prep the plotting device...
     if (not ppgplot_dev_prep_ and setup):
-        prepplot(rangex, rangey, title, labx, laby, \
+	prepplot(rangex, rangey, title, labx, laby, \
                  rangex2, rangey2, labx2, laby2, \
                  logx, logy, logx2, logy2, font, fontsize, \
                  id, aspect, ticks, panels, device=device)
@@ -347,19 +371,31 @@ def plotxy(y, x=None, title=None, rangex=None, rangey=None, \
     if errx is not None:
         if not logx:
             errx = Num.asarray(errx)
-            ppgplot.pgerrx(x+errx, x-errx, y, 1.0)
+	    if errx.size == 1:
+		errx = errx.repeat(x.size)
+	    #ppgplot.pgerrx(x+errx, x-errx, y, 1.0)
+	    ppgplot.pgerrb(5, x, y, errx, 1.0)
         else:
             errx = 10.0**Num.asarray(errx)
-            ppgplot.pgerrx(Num.log10(10.0**x + errx),
-                           Num.log10(10.0**x - errx), y, 1.0)
+	    if errx.size == 1:
+		errx = errx.repeat(x.size)
+	    #ppgplot.pgerrx(Num.log10(10.0**x + errx),
+            #               Num.log10(10.0**x - errx), y, 1.0)
+	    ppgplot.pgerrb(5, x, y, Num.log10(errx), 1.0)
     if erry is not None:
         if not logy:
             erry = Num.asarray(erry)
-            ppgplot.pgerry(x, y+erry, y-erry, 1.0)
+	    if erry.size == 1:
+		erry = erry.repeat(y.size)
+	    #ppgplot.pgerry(x, y+erry, y-erry, 1.0)
+	    ppgplot.pgerrb(6, x, y, erry, 1.0)
         else:
             erry = 10.0**Num.asarray(erry)
-            ppgplot.pgerry(x, Num.log10(10.0**y + erry),
-                           Num.log10(10.0**y - erry), 1.0)
+	    if erry.size == 1:
+		erry = erry.repeat(y.size)
+	    #ppgplot.pgerry(x, Num.log10(10.0**y + erry),
+            #               Num.log10(10.0**y - erry), 1.0)
+	    ppgplot.pgerrb(6, x, y, Num.log10(erry), 1.0)
     # Plot connecting lines if requested
     if not line is None:
         # Choose the line style
@@ -377,7 +413,7 @@ def plotbinned(y, x=None, title=None, labx='Bins', laby='Counts', \
                color=ppgplot_color_, font=ppgplot_font_, logx=0, logy=0, \
                logx2=0, logy2=0, erry=None, id=0, noscale=0, \
                aspect=0.7727, fontsize=ppgplot_font_size_, \
-               ticks='out', panels=[1,1], device=ppgplot_device_, setup=1):
+               ticks='in', panels=[1,1], device=ppgplot_device_, setup=1):
     """
     plotbinned(y, ...):
         Plot x-y data that is binned.  This routine differs from
@@ -503,12 +539,10 @@ def plot2d(z, x=None, y=None, title=None, rangex=None, rangey=None, \
     if y is None: y=Num.arange(z.shape[0], dtype='f')
     else: y = Num.asarray(y)
     # Determine the scaling to use for the axes
-    if rangex is None:
-        dx =  x[-1]-x[-2]
-        rangex=[x[0], x[-1]+dx]
-    if rangey is None:
-        dy =  y[-1]-y[-2]
-        rangey=[y[0], y[-1]+dy]
+    if rangex is None: rangex=[Num.minimum.reduce(x), \
+                             Num.maximum.reduce(x)]
+    if rangey is None: rangey=[Num.minimum.reduce(y), \
+                             Num.maximum.reduce(y)]
     if rangez is None: rangez=[Num.minimum.reduce(Num.ravel(z)), \
                              Num.maximum.reduce(Num.ravel(z))]
     # Prep the plotting device...

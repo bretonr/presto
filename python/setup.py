@@ -23,6 +23,7 @@ presto_library_dirs = []
 make_extension = Extension
 #include_dirs.append(numpy.get_numpy_include())
 include_dirs.append(numpy.get_include())
+include_dirs.append("/opt/local/include")
 ppgplot_include_dirs = include_dirs
 presto_include_dirs = include_dirs
 undef_macros.append('USE_NUMARRAY')

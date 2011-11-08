@@ -13,13 +13,14 @@ undef_macros = []
 extra_compile_args = []
 include_dirs = []
 
-ppgplot_libraries = ["cpgplot", "pgplot", "X11", "png", "m", "g2c"]
+ppgplot_libraries = ["cpgplot", "pgplot", "X11", "png", "m"]
 ppgplot_library_dirs = ["/usr/X11R6/lib"]
 
 # Use NumPy instead of Numeric or numarray
 make_extension = Extension
 #include_dirs.append(numpy.get_numpy_include())
 include_dirs.append(numpy.get_include())
+include_dirs.append("/opt/local/include")
 ppgplot_include_dirs = include_dirs
 presto_include_dirs = include_dirs
 undef_macros.append('USE_NUMARRAY')

@@ -50,17 +50,23 @@ float_keys = ["F", "F0", "F1", "F2", "F3", "F4", "F5", "F6",
               "RA_RAD", "DEC_RAD", "GAMMA", "SINI", "M2", "MTOT",
               "FB0", "FB1", "FB2", "ELAT", "ELONG", "LAMBDA", "BETA",
               "PMRA", "PMDEC"]
-str_keys = ["FILE", "PSR", "RAJ", "DECJ", "EPHEM", "CLK", "BINARY"]
+str_keys = ["FILE", "PSR", "PSRJ", "RAJ", "DECJ", "EPHEM", "CLK", "BINARY"]
 
 class psr_par:
     def __init__(self, parfilenm):
         self.FILE = parfilenm
         pf = open(parfilenm)
         for line in pf.readlines():
+            # Skip comments
+            if line[0]=='#':
+                continue
             # Convert any 'D-' or 'D+' to 'E-' or 'E+'
             line = line.replace("D-", "E-")
             line = line.replace("D+", "E+")
             splitline = line.split()
+            # Skip blank lines
+            if len(splitline)==0:
+                continue
             key = splitline[0]
             if key in str_keys:
                 setattr(self, key, splitline[1])
@@ -126,17 +132,14 @@ class psr_par:
                 f, fd, = pu.p_to_f(self.P0, self.P1)
                 setattr(self, 'F0_ERR', self.P0_ERR/(self.P0*self.P0))
                 setattr(self, 'F1', fd) 
-        if hasattr(self, 'F0_ERR'):
-            if hasattr(self, 'F1_ERR'):
-                p, perr, pd, pderr = pu.pferrs(self.F0, self.F0_ERR,
-                                               self.F1, self.F1_ERR)
-                setattr(self, 'P0_ERR', perr) 
-                setattr(self, 'P1', pd) 
-                setattr(self, 'P1_ERR', pderr) 
-            else:
-                p, pd, = pu.p_to_f(self.F0, self.F1)
-                setattr(self, 'P0_ERR', self.F0_ERR/(self.F0*self.F0))
-                setattr(self, 'P1', pd) 
+        if (hasattr(self, 'F0_ERR') and hasattr(self, 'F1_ERR')):
+            p, perr, pd, pderr = pu.pferrs(self.F0, self.F0_ERR, 
+                                           self.F1, self.F1_ERR)
+            setattr(self, 'P0_ERR', perr) 
+            setattr(self, 'P1', pd) 
+            setattr(self, 'P1_ERR', pderr) 
+        elif (hasattr(self, 'F0') and hasattr(self, 'F0_ERR')):
+            setattr(self, 'P0_ERR', self.F0_ERR/(self.F0*self.F0))
         if hasattr(self, 'EPS1') and hasattr(self, 'EPS2'):
             ecc = math.sqrt(self.EPS1 * self.EPS1 + self.EPS2 * self.EPS2)
             omega = math.atan2(self.EPS1, self.EPS2)

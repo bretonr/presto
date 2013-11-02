@@ -349,21 +349,43 @@ def asini_c(pb, mf):
     return (mf * pb * pb / 8015123.37129)**(1.0 / 3.0)
 
 
-def bins_to_accel(rdot, T, f=[1.0, 1000.0], device="/XWIN"):
+def accel_to_z(accel, T, reffreq, harm=1):
     """
-    bins_to_accel(rdot, T, f=[1.0, 1000.0], device="/XWIN"):
+    accel_to_z(accel, T, reffreq, harm=1):
+        Return the accelsearch 'z' (i.e. number of bins drifted)
+            at a reference frequency 'reffreq', for an observation
+            of duration 'T' seconds and with acceleration (in m/s/s)
+            'accel'.  You can specify the harmonic number in 'harm'.
+    """
+    return accel * harm * reffreq * T * T / SOL
+
+def z_to_accel(z, T, reffreq, harm=1):
+    """
+    z_to_accel(z, T, reffreq, harm=1):
+        Return the acceleration (in m/s/s) corresponding to the
+            accelsearch 'z' (i.e. number of bins drifted) at a 
+            reference frequency 'reffreq', for an observation
+            of duration 'T'. You can specify the harmonic number 
+            in 'harm'.
+    """
+    return z * SOL / (harm * reffreq * T * T)
+
+
+def bins_to_accel(z, T, f=[1.0, 1000.0], device="/XWIN"):
+    """
+    bins_to_accel(z, T, f=[1.0, 1000.0], device="/XWIN"):
         Make a plot showing the acceleration which corresponds
-        to a certain number of Fourier bins drifted 'rdot' during
+        to a certain number of Fourier bins drifted 'z' during
         an observation of length 'T'.
     """
     fs = span(Num.log10(f[0]), Num.log10(f[1]), 1000)
-    accels = rdot * SOL / (T * T * 10.0**fs)
+    accels = z_to_accel(z, T, 10.0**fs)
     if (device):
         Pgplot.plotxy(Num.log10(accels), fs, logx=1, logy=1,
                       labx="Frequency (Hz)",
                       laby="Acceleration (m/s\u2\d)", device=device)
         ppgplot.pgmtxt("T", -2.0, 0.75, 0.0, "T = %.0f sec"%T)
-        ppgplot.pgmtxt("T", -3.5, 0.75, 0.0, "r\B\u\.\d = %.1f bins"%rdot)
+        ppgplot.pgmtxt("T", -3.5, 0.75, 0.0, "r\B\u\.\d = %.1f bins"%z)
         if (device != '/XWIN'):
             Pgplot.closeplot()
     else:
@@ -749,41 +771,46 @@ def read_profile(filenm, normalize=0):
         prof /= max(prof)
     return prof
 
-def calc_phs(MJD, refMJD, f0, f1=0.0, f2=0.0, f3=0.0, f4=0.0, f5=0.0): 
+def calc_phs(MJD, refMJD, *args):
     """
-    calc_phs(MJD, refMJD, f0, f1=0.0, f2=0.0, f3=0.0, f4=0.0, f5=0.0):
-        Return the rotational phase (0-1) at MJD given a reference MJD and the
-            rotational freq (f0) and optional freq derivs (f1-f5).
-    """
-    t = (MJD-refMJD)*SECPERDAY
-    return Num.fmod(t*(f0 +t*(f1/2.0 +
-                                t*(f2/6.0 +
-                                   t*(f3/24.0 +
-                                      t*(f4/120.0 +
-                                         t*f5/720.0))))), 1.0)
-
-def calc_freq(MJD, refMJD, f0, f1=0.0, f2=0.0, f3=0.0, f4=0.0, f5=0.0):
-    """
-    calc_freq(MJD, refMJD, f0, f1=0.0, f2=0.0, f3=0.0, f4=0.0, f5=0.0):
-        Return the instantaneous frequency at an MJD given a reference
-            MJD and the rotational freq (f0) and optional freq derivs (f1-f5).
+    calc_phs(MJD, refMJD, *args):
+        Return the rotational phase (0-1) at MJD (can be an array)
+            given a reference MJD and the rotational freq (f0) and
+            optional freq derivs (f1...) as ordered in the *args
+            list (e.g. [f0, f1, f2, ...]).
     """
     t = (MJD-refMJD)*SECPERDAY
-    return f0 + t*(f1 +
-                   t*(f2/2.0 +
-                      t*(f3/6.0 +
-                         t*(f4/24.0 +
-                            t*f5/120.0))))
+    n = len(args) # polynomial order
+    nargs = Num.concatenate(([0.0], args))
+    taylor_coeffs = Num.concatenate(([0.0],
+                                     Num.cumprod(1.0/(Num.arange(float(n))+1.0))))
+    p = Num.poly1d((taylor_coeffs * nargs)[::-1])
+    return Num.fmod(p(t), 1.0)
 
-def calc_t0(MJD, refMJD, f0, f1=0.0, f2=0.0, f3=0.0, f4=0.0, f5=0.0):
+def calc_freq(MJD, refMJD, *args):
     """
-    calc_t0(MJD, refMJD, f0, f1=0.0, f2=0.0, f3=0.0, f4=0.0, f5=0.0):
+    calc_freq(MJD, refMJD, *args):
+        Return the instantaneous frequency at an MJD (can be an array)
+            given a reference MJD and the rotational freq (f0) and
+            optional freq derivs (f1...) as ordered in the *args
+            list (e.g. [f0, f1, f2, ...]).
+    """
+    t = (MJD-refMJD)*SECPERDAY
+    n = len(args) # polynomial order
+    taylor_coeffs = Num.concatenate(([1.0],
+                                     Num.cumprod(1.0/(Num.arange(float(n-1))+1.0))))
+    p = Num.poly1d((taylor_coeffs * args)[::-1])
+    return p(t)
+
+def calc_t0(MJD, refMJD, *args):
+    """
+    calc_t0(MJD, refMJD, *args):
         Return the closest previous MJD corresponding to phase=0 of the pulse.
+            *args are the spin freq (f0) and optional freq derivs (f1...)
     """
-    phs = calc_phs(MJD, refMJD, f0, f1, f2, f3, f4, f5)
-    p = 1.0/calc_freq(MJD, refMJD, f0, f1, f2, f3, f4, f5)
-    return MJD-phs*p/SECPERDAY
-
+    phs = calc_phs(MJD, refMJD, *args)
+    p = 1.0 / calc_freq(MJD, refMJD, *args)
+    return MJD - phs*p/SECPERDAY
 
 def write_princeton_toa(toa_MJDi, toa_MJDf, toaerr, freq, dm, obs='@', name=' '*13):
     """
@@ -805,6 +832,17 @@ def write_princeton_toa(toa_MJDi, toa_MJDf, toaerr, freq, dm, obs='@', name=' '*
     else:
         print obs+" %13s %8.3f %s %8.2f" % \
               (name, freq, toa, toaerr)
+
+def write_tempo2_toa(toa_MJDi, toa_MJDf, toaerr, freq, dm, obs='@', name='unk', flags=""):
+    """
+    Write Tempo2 format TOAs.
+    Note that first line of file should be "FORMAT 1"
+    TOA format is "file freq sat satErr siteID <flags>"
+    """
+    toa = "%5d"%int(toa_MJDi) + ("%.13f"%toa_MJDf)[1:]
+    if dm != 0.0:
+        flags += "-dm %.4f" % (dm,)
+    print "%s %f %s %.2f %s %s" % (name,freq,toa,toaerr,obs,flags)
 
 def rotate(arr, bins):
     """
@@ -836,19 +874,20 @@ def fft_rotate(arr, bins):
         Return array 'arr' rotated by 'bins' places to the left.  The
             rotation is done in the Fourier domain using the Shift Theorem.
             'bins' can be fractional.  The resulting vector will have
-            the same length as the oiginal.
+            the same length as the original.
     """
     arr = Num.asarray(arr)
     freqs = Num.arange(arr.size/2+1, dtype=Num.float)
     phasor = Num.exp(complex(0.0, TWOPI) * freqs * bins / float(arr.size))
-    return Num.fft.irfft(phasor * Num.fft.rfft(arr))
+    return Num.fft.irfft(phasor * Num.fft.rfft(arr), arr.size)
 
 def corr(profile, template):
     """
     corr(profile, template):
         Cross-correlate (using FFTs) a 'profile' and a 'template'.
     """
-    return FFT.irfft(FFT.rfft(template) * Num.conjugate(FFT.rfft(profile)))
+    return FFT.irfft(FFT.rfft(template) * Num.conjugate(FFT.rfft(profile)),
+                     profile.size)
 
 def autocorr(x):
     """
@@ -858,7 +897,7 @@ def autocorr(x):
         points are symmetric (corresponding to negative lags).
     """
     fftx = FFT.rfft(x)
-    acf = FFT.irfft(fftx * Num.conjugate(fftx))[:len(x)/2+1]
+    acf = FFT.irfft(fftx * Num.conjugate(fftx), x.size)[:len(x)/2+1]
     return acf / acf[0]
 
 def maxphase(profile, template):

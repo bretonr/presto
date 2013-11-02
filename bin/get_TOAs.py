@@ -12,6 +12,8 @@ scopes = {'GBT':'1',
           'Parkes':'7',
           'GMRT': 'r',
           'IRAM': 's',
+          'LWA1': 'x',
+          'LWA': 'x',
           'Geocenter': 'o'}
 
 def measure_phase(profile, template, rotate_prof=True):
@@ -30,7 +32,7 @@ def measure_phase(profile, template, rotate_prof=True):
     return shift,eshift,snr,esnr,b,errb,ngood
 
 def usage():
-    print """
+    sys.stderr.write("""
 usage:  get_TOAs.py [options which must include -t or -g] pfd_file
   [-h, --help]                       : Display this help
   [-s numsub, --subbands=numsub]     : Divide the fold into numsub subbands
@@ -46,16 +48,19 @@ usage:  get_TOAs.py [options which must include -t or -g] pfd_file
   [-o seconds, --offset=seconds]     : Add the offset in seconds to any TOAs
   [-e, --event]                      : The .pfd file was made with events
   [-r, --norotate]                   : Do not rotate the template for FFTFIT
+  [-2, --tempo2]                     : Write Tempo2 format TOAs
   pfd_file                           : The .pfd file containing the folds
 
   The program generates TOAs from a .pfd file using Joe Taylor's
-  FFTFIT program. The TOAs are output to STDOUT.  Typically, the .pfd
+  FFTFIT program.  The TOAs are output to STDOUT.  Typically, the .pfd
   file is created using prepfold with the "-timing" flag and an
   appropriate .par file on either a topocentric time series or raw
   telescope data.  But barycentric folds or folds of barycentered
-  events are also acceptable.  The most important thing about the
-  fold, though, is that it must have been made using "-nosearch"! 
-  (Note: "-timing" implies "-nosearch")
+  events are also acceptable.  The number of bins in the folded profile
+  must be a power of two for FFTFIT to work.  The most important thing 
+  about the fold, though, is that it must have been made using "-nosearch"! 
+  (Note: "-timing" implies "-nosearch" and forces a power-of-two number 
+  of bins.)
   
   A typical example would be something like:
       
@@ -76,13 +81,13 @@ usage:  get_TOAs.py [options which must include -t or -g] pfd_file
   displayed for each TOA that shows the "b +/- berr" and "SNR +/-
   SNRerr" params from FFTFIT.
   
-"""
+""")
 
 if __name__ == '__main__':
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "herfs:n:d:g:t:o:k:i:",
+        opts, args = getopt.getopt(sys.argv[1:], "herf2s:n:d:g:t:o:k:i:",
                                    ["help", "event", "norotate", "FFTFITouts",
-                                    "subbands=", "numtoas=", "dm=", "gaussian=",
+                                    "tempo2","subbands=", "numtoas=", "dm=", "gaussian=",
                                     "template=", "offset=", "kill=", "kints="])
                                     
     except getopt.GetoptError:
@@ -103,6 +108,7 @@ if __name__ == '__main__':
     otherouts = 0
     offset = 0.0
     events = 0
+    t2format = False
     kill = []
     kints = []
     for o, a in opts:
@@ -113,6 +119,8 @@ if __name__ == '__main__':
             otherouts = 1
         if o in ("-r", "--norotate"):
             rotate_prof = False
+        if o in ("-2", "--tempo2"):
+            t2format = True
         if o in ("-e", "--event"):
             lowfreq = 0.0
             DM = 0.0
@@ -151,12 +159,22 @@ if __name__ == '__main__':
 
     # Read the prepfold output file and the binary profiles
     fold_pfd = pfd(sys.argv[-1])
+
+    # Check to make sure we can use this .pfd for timing purposes
+    if not fold_pfd.use_for_timing():
+        sys.stderr.write(
+            "Error: '%s' was made allowing prepfold to search!\n" % \
+            sys.argv[-1])
+        sys.exit(2)
     
     # Read key information from the bestprof file
     if fold_pfd.bestprof:
-	fold = fold_pfd.bestprof
+        fold = fold_pfd.bestprof
     else:
-	sys.sterr.write("Warning:  Could not open the bestprof file!")
+        sys.stderr.write(
+            "Error:  Can't open '%s.bestrof'!  Regenerate with show_pfd.\n" % \
+            sys.argv[-1])
+        sys.exit(2)
     timestep_sec = fold.T / numtoas
     timestep_day = timestep_sec / SECPERDAY
     fold.epoch = fold.epochi+fold.epochf
@@ -225,7 +243,7 @@ if __name__ == '__main__':
         obs = '@'  # Solarsystem Barycenter
     else:
         try: obs = scopes[fold_pfd.telescope.split()[0]]
-        except KeyError:  print "Unknown telescope!!!"
+        except KeyError:  sys.stderr.write("Unknown telescope!!! : " + fold_pfd.telescope)
 
     # Read the polyco file (if required)
     if (fold.psr and fold.topo):
@@ -245,6 +263,9 @@ if __name__ == '__main__':
     # Calculate the TOAs
     #
 
+    if t2format:
+        print "FORMAT 1"
+        
     for ii in range(numtoas):
 
         # The .pfd file was generated using -nosearch and a specified
@@ -301,16 +322,25 @@ if __name__ == '__main__':
                         sys.stderr.write("Note:  Downsampling the data for '%s'\n"%fold_pfd.filenm)
 
             try:
-                # Try using FFTFIT first
-                shift,eshift,snr,esnr,b,errb,ngood = measure_phase(prof, template, rotate_prof)
-                # tau and tau_err are the predicted phase of the pulse arrival
-                tau, tau_err = shift/len(prof), eshift/len(prof)
-                # Note: "error" flags are shift = 0.0 and eshift = 999.0
+                tau = None
+                if len(prof) & 2*len(prof):
+                    sys.stderr.write("Profile length %d is not a power of two; unable to use FFTFIT.\n" % len(prof))
+                elif len(template) & 2*len(template):
+                    sys.stderr.write("Template length %d is not a power of two; unable to use FFTFIT.\n" % len(template))
+                else:
+                    # Try using FFTFIT first
+                    shift,eshift,snr,esnr,b,errb,ngood = measure_phase(prof, template, rotate_prof)
+                    # tau and tau_err are the predicted phase of the pulse arrival
+                    tau, tau_err = shift/len(prof), eshift/len(prof)
+                    # Note: "error" flags are shift = 0.0 and eshift = 999.0
 
-                # If that failed, use a time-domain correlation
-                if (Num.fabs(shift) < 1e-7 and
-                    Num.fabs(eshift-999.0) < 1e-7):
-                    print "Warning!  Bad return from FFTFIT.  Using PRESTO correlation..."
+                    # If that failed, use a time-domain correlation
+                    if (Num.fabs(shift) < 1e-7 and
+                        Num.fabs(eshift-999.0) < 1e-7):
+                        sys.stderr.write("Warning!  Bad return from FFTFIT. May be due to inadequate signal-to-noise.\n")
+                        tau = None
+                if tau is None:
+                    sys.stderr.write("Warning: using PRESTO correlation - reported error is incorrect...\n")
                     # Not enough structure in the template profile for FFTFIT
                     # so use time-domain correlations instead
                     tau = psr_utils.measure_phase_corr(prof, template)
@@ -329,12 +359,17 @@ if __name__ == '__main__':
                 # Send the TOA to STDOUT
                 toaf = t0f + (tau_tot*p + offset)/SECPERDAY
                 newdays = int(Num.floor(toaf))
-                psr_utils.write_princeton_toa(t0i+newdays, toaf-newdays,
-                                              tau_err*p*1000000.0,
-                                              sumsubfreqs[jj], 0.0, obs=obs)
+                if t2format:
+                    psr_utils.write_tempo2_toa(t0i+newdays, toaf-newdays,
+                                                  tau_err*p*1000000.0,
+                                                  sumsubfreqs[jj], 0.0, name=fold_pfd.pfd_filename, obs=obs)
+                else:
+                    psr_utils.write_princeton_toa(t0i+newdays, toaf-newdays,
+                                                  tau_err*p*1000000.0,
+                                                  sumsubfreqs[jj], 0.0, obs=obs)
                 if (otherouts):
-                    print "FFTFIT results:  b = %.4g +/- %.4g   SNR = %.4g +/- %.4g" % \
-                          (b, errb, snr, esnr)
+                    sys.stderr.write("FFTFIT results:  b = %.4g +/- %.4g   SNR = %.4g +/- %.4g" %
+                          (b, errb, snr, esnr))
 
             except ValueError, fftfit.error:
                 pass

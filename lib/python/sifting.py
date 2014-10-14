@@ -227,6 +227,12 @@ class Candlist(object):
     def __iter__(self):
         return iter(self.cands)
 
+    def __getitem__(self, key):
+        return self.cands[key]
+
+    def __delitem__(self, key):
+        del(self.cands[key])
+
     def sort(self, *args, **kwargs):
         self.cands.sort(*args, **kwargs)
 
@@ -245,7 +251,6 @@ class Candlist(object):
 
         fig = plt.figure(figsize=(10,8)) 
         ax = plt.axes((0.08, 0.18, 0.87, 0.80)) 
-        plt.set_cmap("Spectral") 
         
         # Get all candidates and sort by sigma
         allcands = self.get_all_cands()
@@ -267,6 +272,7 @@ class Candlist(object):
         scatt = plt.scatter(xdata, dms, s=sigma_to_size(sigmas), \
                                 c=Num.log2(numharms), \
                                 marker='o', alpha=0.7, zorder=-1) 
+        plt.set_cmap("Spectral") 
   
         # Add colorbar 
         fmtr = matplotlib.ticker.FuncFormatter(lambda x, pos: "%d" % 2**x)
@@ -314,11 +320,11 @@ class Candlist(object):
         ax = plt.axes((0.08, 0.18, 0.87, 0.80)) 
         
         # Plot bad candidates
-        candlists = [self.badcands_knownbirds, self.badcands_longperiod, \
-                     self.badcands_shortperiod, self.badcands_threshold, \
-                     self.badcands_harmpowcutoff, self.badcands_rogueharmpow, \
-                     self.harmonic_cands, self.dmproblem_cands, self.cands, \
-                     self.duplicate_cands]
+        candlists = [self.badlists['knownbirds'], self.badlists['longperiod'], \
+                     self.badlists['shortperiod'], self.badlists['threshold'], \
+                     self.badlists['harmpowcutoff'], self.badlists['rogueharmpow'], \
+                     self.badlists['harmonic'], self.badlists['dmproblem'], \
+                     self.cands, self.duplicates]
         labels = ['Known birdires', 'Long period', 'Short period', \
                     'Threshold', 'Harm power cutoff', 'Rogue harm power', \
                     'Harmonic cand', 'DM problem', 'Good cands', 'Hits']
@@ -482,14 +488,14 @@ class Candlist(object):
     def mark_as_duplicate(self, icand):
         cand = self.cands.pop(icand)
         if self.trackdupes:
-            self.duplicates.append(self.cands.pop(icand))
+            self.duplicates.append(cand)
 
     def get_all_cands(self):
         cands = self.get_all_goodcands()
         return self.get_all_goodcands() + self.get_all_badcands()
 
     def get_all_goodcands(self):
-        return self.cands + self.duplicate_cands
+        return self.cands + self.duplicates
 
     def get_all_badcands(self):
         cands = []
@@ -499,7 +505,7 @@ class Candlist(object):
 
     def reject_longperiod(self, long_period=None):
         """Find and remove very long period candidates.
-            Long period candidates are moved to the 'badcands_longperiod' list.
+            Long period candidates are moved to the 'longperiod' bad-list.
 
             Inputs:
                 long_period: The longest allowed period for a 'good' cand.
@@ -519,7 +525,7 @@ class Candlist(object):
     
     def reject_shortperiod(self, short_period=None):
         """Find and remove very short period candidates.
-            Short period candidates are moved to the 'badcands_shortperiod' list.
+            Short period candidates are moved to the 'shortperiod' bad-list.
 
             Inputs:
                 short_period: The shortest allowed period for a 'good' cand.
@@ -941,29 +947,31 @@ class Candlist(object):
         """
         if summaryfilenm is None:
             summaryfile = sys.stdout
+        elif summaryfilenm in [sys.stdout, sys.stderr]:
+            summaryfile = summaryfilenm
         else:
             summaryfile = open(summaryfilenm, "w")
         summaryfile.write("   Candlist contains %d 'good' candidates\n" % \
                             len(self.cands))
         summaryfile.write("      # Known RFI rejects:           %d\n" % \
-              len(self.badcands_knownbirds))
+              len(self.badlists['knownbirds']))
         summaryfile.write("      # Short period rejects:        %d\n" % \
-              len(self.badcands_shortperiod))
+              len(self.badlists['shortperiod']))
         summaryfile.write("      # Long period rejects:         %d\n" % \
-              len(self.badcands_longperiod))
+              len(self.badlists['longperiod']))
         summaryfile.write("      # Missed threshold:            %d\n" % \
-              len(self.badcands_threshold))
+              len(self.badlists['threshold']))
         summaryfile.write("      # No good harmonics:           %d\n" % \
-              len(self.badcands_harmpowcutoff))
+              len(self.badlists['harmpowcutoff']))
         summaryfile.write("      # One bad harmonic:            %d\n" % \
-              len(self.badcands_rogueharmpow))
+              len(self.badlists['rogueharmpow']))
         summaryfile.write("      # Duplicate candidates:        %d\n" % \
-              len(self.duplicate_cands))
+              len(self.duplicates))
         summaryfile.write("      # Harmonic candidates:         %d\n" % \
-              len(self.harmonic_cands))
+              len(self.badlists['harmonic']))
         summaryfile.write("      # Candidates with DM problems: %d\n" % \
-              len(self.dmproblem_cands))
-        if summaryfilenm is not None:
+              len(self.badlists['dmproblem']))
+        if summaryfilenm not in [None, sys.stdout, sys.stderr]:
             summaryfile.close()
   
     def write_cand_report(self, reportfilenm=None):
@@ -1058,7 +1066,7 @@ class Candlist(object):
             candfile.close()
 
 
-def candlist_from_candfile(filename):
+def candlist_from_candfile(filename, trackbad=False, trackdupes=False):
     candfile = open(filename, 'r')
     # First identify the length of the observation searched
     for line in candfile:
@@ -1074,11 +1082,16 @@ def candlist_from_candfile(filename):
     cands = []
     candnums = []
     current_goodcandnum = 0
+    last_candnum = 0
+    last_goodcandnum = 0
+
     for line in candfile:
         # Identify the candidates in the top of the file
         if fund_re.match(line):
             split_line = line.split()
             candnum   = int(split_line[0])
+            if len(cands) and len(split_line[0])==4 and cands[-1].candnum >= 9999:
+                candnum = last_candnum + 1
             sigma     = float(split_line[1])
             i_pow_det = float(split_line[2])
             c_pow     = float(split_line[3])
@@ -1094,13 +1107,16 @@ def candlist_from_candfile(filename):
                                           i_pow_det, c_pow, bin, z, 
                                           DMstr, filename, tobs))
             candnums.append(candnum)
+            last_candnum = candnum
             continue
 
         # Parse the harmonic powers
         elif harms_re.match(line):
             split_line = line.split()
             candnum = int(split_line[0])
-
+            # For rare cases where >10K cands, candnum is wrong in ACCEL file
+            if len(split_line[0])==4 and last_goodcandnum >= 9999:
+                candnum = last_goodcandnum + 1
             if candnum in candnums:
                 cand = cands[candnums.index(candnum)]
                 cand.harm_pows = Num.zeros(cand.numharm, dtype=Num.float64)
@@ -1113,6 +1129,7 @@ def candlist_from_candfile(filename):
                     current_goodcandnum = candnum
                     current_harmnum = 1
                 else:
+                    last_goodcandnum = candnum
                     current_goodcandnum = 0
                     # Compute the S/N
                     cand.harms_to_snr()
@@ -1147,9 +1164,10 @@ def candlist_from_candfile(filename):
                 # List candidate as a hit of itself
                 cand.hits = [(cand.DM, cand.snr, cand.sigma)]
                 cand.ipow_det = opt_ipow
+                last_goodcandnum = candnum
                 current_goodcandnum = 0
     candfile.close()
-    return Candlist(cands)
+    return Candlist(cands, trackbad=trackbad, trackdupes=trackdupes)
 
 
 def read_candidates(filenms, prelim_reject=True, track=False):
@@ -1169,7 +1187,7 @@ def read_candidates(filenms, prelim_reject=True, track=False):
     if filenms:
         print "\nReading candidates from %d files...." % len(filenms)
         for ii, filenm in enumerate(filenms):
-            curr_candlist = candlist_from_candfile(filenm)
+            curr_candlist = candlist_from_candfile(filenm, trackbad=track, trackdupes=track)
             if prelim_reject:
                 curr_candlist.default_rejection()
             candlist.extend(curr_candlist)

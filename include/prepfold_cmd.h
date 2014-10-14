@@ -39,8 +39,12 @@ typedef struct s_Cmdline {
   char topoP;
   /***** -invert: For rawdata, flip (or invert) the band */
   char invertP;
+  /***** -zerodm: Subtract the mean of all channels from each sample (i.e. remove zero DM) */
+  char zerodmP;
   /***** -absphase: Use the absolute phase associated with polycos */
   char absphaseP;
+  /***** -barypolycos: Force the use of polycos for barycentered events */
+  char barypolycosP;
   /***** -numwapps: Number of WAPPs used with contiguous frequencies */
   char numwappsP;
   int numwapps;

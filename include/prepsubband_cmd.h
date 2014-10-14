@@ -49,10 +49,12 @@ typedef struct s_Cmdline {
   int clipC;
   /***** -noclip: Do not clip the data.  (The default is to _always_ clip!) */
   char noclipP;
-  /***** -runavg: Running mean subtraction from the input data */
-  char runavgP;
+  /***** -invert: For rawdata, flip (or invert) the band */
+  char invertP;
   /***** -zerodm: Subtract the mean of all channels from each sample (i.e. remove zero DM) */
   char zerodmP;
+  /***** -runavg: Running mean subtraction from the input data */
+  char runavgP;
   /***** -sub: Write subbands instead of de-dispersed data */
   char subP;
   /***** -subdm: The DM to use when de-dispersing subbands for -sub */
@@ -87,6 +89,10 @@ typedef struct s_Cmdline {
   char downsampP;
   int downsamp;
   int downsampC;
+  /***** -dmprec: The number of decimals in the precision of the DM in the filename. */
+  char dmprecP;
+  int dmprec;
+  int dmprecC;
   /***** -mask: File containing masking information to use */
   char maskfileP;
   char* maskfile;

@@ -86,19 +86,19 @@ void unset_oldmask_bits(mask * oldmask, unsigned char **bytemask)
 void free_mask(mask obsmask)
 /* Free the contents of an mask structure */
 {
-   int ii;
+    int ii;
 
-   for (ii = 0; ii < obsmask.numint; ii++) {
-      if (obsmask.num_chans_per_int[ii] > 0 &&
-          obsmask.num_chans_per_int[ii] <= obsmask.numchan)
-         vect_free(obsmask.chans[ii]);
-   }
-   free(obsmask.chans);
-   vect_free(obsmask.num_chans_per_int);
-   if (obsmask.num_zap_chans)
-      vect_free(obsmask.zap_chans);
-   if (obsmask.num_zap_ints)
-      vect_free(obsmask.zap_ints);
+    for (ii = 0; ii < obsmask.numint; ii++) {
+        if (obsmask.num_chans_per_int[ii] > 0 &&
+            obsmask.num_chans_per_int[ii] <= obsmask.numchan)
+            vect_free(obsmask.chans[ii]);
+    }
+    free(obsmask.chans);
+    vect_free(obsmask.num_chans_per_int);
+    if (obsmask.num_zap_chans)
+        vect_free(obsmask.zap_chans);
+    if (obsmask.num_zap_ints)
+        vect_free(obsmask.zap_ints);
 }
 
 
@@ -176,11 +176,11 @@ void calc_avgmedstd(float *arr, int numarr, float fraction,
 }
 
 
-int determine_padvals(char *maskfilenm, mask * obsmask, float *padvals[])
-/* Determine reasonable padding values from the rfifind produced  */
-/* *.stats file if it is available.  Return the allocated vector  */
-/* (of length numchan) in padvals.  Return a '1' if the routine   */
-/* used the stats file, return 0 if the padding was set to aeros. */
+int determine_padvals(char *maskfilenm, mask * obsmask, float *padvals)
+// Determine reasonable padding values from the rfifind produced
+// *.stats file if it is available.  The pre-allocated vector (of
+// length numchan) is in padvals.  Return a '1' if the routine used
+// the stats file, return 0 if the padding was set to zeros.
 {
    FILE *statsfile;
    int ii, numchan, numint, ptsperint, lobin, numbetween;
@@ -196,7 +196,6 @@ int determine_padvals(char *maskfilenm, mask * obsmask, float *padvals[])
       sprintf(statsfilenm, "%s.stats", root);
       free(root);
       free(suffix);
-      *padvals = gen_fvect(obsmask->numchan);
       /* Check to see if the file exists */
       printf("Attempting to read the data statistics from '%s'...\n", statsfilenm);
       statsfile = chkfopen(statsfilenm, "rb");
@@ -215,7 +214,7 @@ int determine_padvals(char *maskfilenm, mask * obsmask, float *padvals[])
          /* Set the padding values equal to the mid-80% channel averages */
          for (ii = 0; ii < numchan; ii++)
             calc_avgmedstd(dataavg[0] + ii, numint, 0.8, numchan,
-                           *padvals + ii, &tmp1, &tmp2);
+                           padvals + ii, &tmp1, &tmp2);
          printf
              ("...succeded.  Set the padding values equal to the mid-80%% channel averages.\n");
          vect_free(dataavg[0]);
@@ -223,11 +222,11 @@ int determine_padvals(char *maskfilenm, mask * obsmask, float *padvals[])
          fclose(statsfile);
          return 1;
       } else {
-         /* This is a temporary solution */
-         for (ii = 0; ii < obsmask->numchan; ii++)
-            (*padvals)[ii] = 0.0;
-         printf("...failed.\n  Set the padding values to 0.\n");
-         return 0;
+          /* This is a temporary solution */
+          for (ii = 0; ii < obsmask->numchan; ii++)
+              padvals[ii] = 0.0;
+          printf("...failed.\n  Set the padding values to 0.\n");
+          return 0;
       }
    }
 }

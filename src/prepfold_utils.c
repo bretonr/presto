@@ -180,9 +180,9 @@ int read_shorts(FILE * file, float *data, int numpts, int numchan)
 }
 
 
-int read_subbands(FILE * infiles[], int numfiles, float *subbanddata,
-                  double timeperblk, int *maskchans,
-                  int *nummasked, mask * obsmask, float *padvals)
+int read_PRESTO_subbands(FILE * infiles[], int numfiles, float *subbanddata,
+                         double timeperblk, int *maskchans,
+                         int *nummasked, mask * obsmask, float *padvals)
 /* Read short int subband data written by prepsubband     */
 /* Note:  This version returns a transpose of the version */
 /*        listed in prepsubband.c                         */
@@ -610,34 +610,10 @@ void read_prepfoldinfo(prepfoldinfo * in, char *filename)
    itmp = read_int(infile, byteswap);
    in->pgdev = calloc(itmp + 1, sizeof(char));
    chkfread(in->pgdev, sizeof(char), itmp, infile);
-   {
-      int has_posn = 1, ii;
-      chkfread(temp, sizeof(char), 16, infile);
-      /* Check to see if a position string was written */
-      for (ii = 0; ii < 16; ii++) {
-         if (!isdigit(temp[ii]) &&
-             temp[ii] != ':' &&
-             temp[ii] != '.' && temp[ii] != '-' && temp[ii] != '\0') {
-            has_posn = 0;
-            break;
-         }
-      }
-      if (has_posn) {
-         strcpy(in->rastr, temp);
-         chkfread(in->decstr, sizeof(char), 16, infile);
-         in->dt = read_double(infile, byteswap);
-         in->startT = read_double(infile, byteswap);
-      } else {
-         strcpy(in->rastr, "Unknown");
-         strcpy(in->decstr, "Unknown");
-         in->dt = *(double *) (temp + 0);
-         if (byteswap)
-            in->dt = swap_double(in->dt);
-         in->startT = *(double *) (temp + sizeof(double));
-         if (byteswap)
-            in->startT = swap_double(in->startT);
-      }
-   }
+   chkfread(in->rastr, sizeof(char), 16, infile);
+   chkfread(in->decstr, sizeof(char), 16, infile);
+   in->dt = read_double(infile, byteswap);
+   in->startT = read_double(infile, byteswap);
    in->endT = read_double(infile, byteswap);
    in->tepoch = read_double(infile, byteswap);
    in->bepoch = read_double(infile, byteswap);

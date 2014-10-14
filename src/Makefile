@@ -57,8 +57,8 @@ CLIG = clig
 # For Opterons, use -march=opteron
 # For Intel Core2 chips, use -march=nocona
 # For gcc-4.X, use -mtune=native
-CC = gcc
-FC = gfortran
+CC = gcc-mp-4.8 -march=corei7
+FC = gfortran-mp-4.8 -march=corei7
 #FC = g77
 CFLAGS = -I$(PRESTO)/include $(OTHERINCDIR) $(PGPLOTINCDIR) $(FFTINCDIR) \
 	-D$(FFTTYPE) -DUSEMMAP -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64 \

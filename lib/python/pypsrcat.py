@@ -7,13 +7,12 @@ import struct, os, os.path, presto, psr_utils, math
 
 ## And here is the command used to get the data:
 # Note version number now!
-# http://www.atnf.csiro.au/people/pulsar/psrcat/proc_form.php?version=1.50&Name=Name&JName=JName&RaJ=RaJ&DecJ=DecJ&PMRA=PMRA&PMDec=PMDec&PX=PX&PosEpoch=PosEpoch&GL=GL&GB=GB&P0=P0&P1=P1&F2=F2&F3=F3&PEpoch=PEpoch&DM=DM&DM1=DM1&S400=S400&S1400=S1400&Binary=Binary&T0=T0&PB=PB&A1=A1&OM=OM&Ecc=Ecc&Tasc=Tasc&Eps1=Eps1&Eps2=Eps2&Dist=Dist&Assoc=Assoc&Type=Type&startUserDefined=true&c1_val=&c2_val=&c3_val=&c4_val=&sort_attr=jname&sort_order=asc&condition=&pulsar_names=&ephemeris=short&coords_unit=raj%2Fdecj&radius=&coords_1=&coords_2=&style=Long+with+errors&no_value=*&x_axis=&x_scale=linear&y_axis=&y_scale=linear&state=query&table_bottom.x=40&table_bottom.y=0
-
+# http://www.atnf.csiro.au/people/pulsar/psrcat/proc_form.php?version=1.53&Name=Name&JName=JName&RaJ=RaJ&DecJ=DecJ&PMRA=PMRA&PMDec=PMDec&PX=PX&PosEpoch=PosEpoch&GL=GL&GB=GB&P0=P0&P1=P1&F2=F2&F3=F3&PEpoch=PEpoch&DM=DM&DM1=DM1&S400=S400&S1400=S1400&Binary=Binary&T0=T0&PB=PB&A1=A1&OM=OM&Ecc=Ecc&Tasc=Tasc&Eps1=Eps1&Eps2=Eps2&Dist=Dist&Assoc=Assoc&Survey=Survey&Type=Type&startUserDefined=true&c1_val=&c2_val=&c3_val=&c4_val=&sort_attr=jname&sort_order=asc&condition=&pulsar_names=&ephemeris=short&coords_unit=raj%2Fdecj&radius=&coords_1=&coords_2=&style=Short+with+errors&no_value=*&x_axis=&x_scale=linear&y_axis=&y_scale=linear&state=query&table_bottom.x=40&table_bottom.y=0
 
 params = ["NAME", "PSRJ", "RAJ", "DECJ", "PMRA", "PMDEC", "PX", "POSEPOCH",
           "Gl", "Gb", "P0", "P1", "F2", "F3", "PEPOCH", "DM", "DM1",
           "S400", "S1400", "BINARY", "T0", "PB", "A1", "OM", "ECC",
-          "TASC", "EPS1", "EPS2", "DIST", "ASSOC", "PSR"]
+          "TASC", "EPS1", "EPS2", "DIST", "ASSOC", "SURVEY", "PSR"]
 params_with_errs = ["RAJ", "DECJ", "PMRA", "PMDEC", "PX", "P0", "P1", "F2", "F3",
                     "DM", "DM1", "S400", "S1400", "T0", "PB", "A1", "OM", "ECC",
                     "TASC", "EPS1", "EPS2"]
@@ -24,10 +23,9 @@ class psr:
         parts = line.split()[1:]
         part_index = 0
         param_index = 0
-        # print parts
         while param_index < len(params):
             param = params[param_index]
-            # print param, parts[part_index]
+            #print param, parts[part_index]
             if param=="NAME":
                 if not parts[part_index]=='*':
                     self.name = parts[part_index][1:]
@@ -40,6 +38,7 @@ class psr:
                         self.name = ""
             elif param=="RAJ":
                 if not parts[part_index]=='*':
+                    self.rajstr = parts[part_index]
                     hms = map(float, parts[part_index].split(':'))
                     if len(hms)==3:
                         h, m, s = hms
@@ -54,6 +53,7 @@ class psr:
                 part_index += 1
             elif param=="DECJ":
                 if not parts[part_index]=='*':
+                    self.decjstr = parts[part_index]
                     dms = map(float, parts[part_index].split(':'))
                     if len(dms)==3:
                         d, m, s = dms
@@ -199,6 +199,11 @@ class psr:
                     self.assoc = parts[part_index]
                 else:
                     self.assoc = None
+            elif param=="SURVEY":
+                if not parts[part_index]=='*':
+                    self.survey = parts[part_index]
+                else:
+                    self.survey = None
             elif param=="PSR":
                 if not parts[part_index]=='*':
                     self.type = parts[part_index]
@@ -220,6 +225,9 @@ class psr:
             out = out + "                 Alias = %s\n" % self.alias
         if (self.assoc is not None):
             out = out + "           Association = %s\n" % self.assoc
+        if (self.survey is not None):
+            out = out + "     Survey Detections = %s\n" % self.survey
+            out = out + "    (Discoverer first)\n"
         if (self.type is not None):
             out = out + "                  Type = %s\n" % self.type
         (h, m, s) = psr_utils.rad_to_hms(self.ra)
@@ -300,6 +308,10 @@ num_binaries = 0
 presto_path = os.getenv("PRESTO")
 infile = open(os.path.join(presto_path, "lib", "psr_catalog.txt"))
 for line in infile:
+    line, sep, comment = line.partition('#')
+    line = line.strip()
+    if not line:
+        continue
     if line[0] in digits:
         currentpulsar = psr(line)
         pulsars[currentpulsar.jname] = currentpulsar
@@ -325,6 +337,20 @@ for psr in psrs:
     if psr.alias:
         psr_aliases[psr.alias] = psr
 
+# No create a new master dictionary with all pulsar names and aliases
+allpsrs = {}
+for psr in psrs:
+    allpsrs[psr.jname] = psr
+    allpsrs["j%s" % psr.jname] = psr
+    allpsrs["J%s" % psr.jname] = psr
+
+    if psr.alias:
+        allpsrs[psr.alias] = psr
+    if psr.name:
+        allpsrs[psr.name] = psr
+        allpsrs["b%s" % psr.name] = psr
+        allpsrs["B%s" % psr.name] = psr
+
 # Add a couple important pulsars
 for psr in psrs:
     if psr.jname=="1614-23":
@@ -341,6 +367,17 @@ for psr in psrs:
         psr.l  = 351.91856
         psr.b  = 19.74496
         psr.dist = 1.80
+    if psr.jname=="2204+27":
+        psr.x  = 0.1
+        psr.xerr  = 1.0
+        psr.e  = 0.129
+        psr.eerr  = 0.05
+        psr.To = 57000.0
+        psr.Toerr = 16.0
+        psr.w  = 180.0
+        psr.werr  = 180.0
+        psr.pb = 32.0*24.0
+        psr.pberr = 1.0
 
 # If calling this as a main program, then write out the new pulsars.cat file
 if __name__ == '__main__' :
@@ -350,6 +387,9 @@ if __name__ == '__main__' :
     print "Writing %d pulsars (%d binaries) to %s" % \
           (len(psrs), num_binaries, outfilename)
     for ii, psr in enumerate(psrs):
-        outfile.write(psr.pack_structs())
+        try:
+            outfile.write(psr.pack_structs())
+        except:
+            print ii, psr.jname
     outfile.close()
 

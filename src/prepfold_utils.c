@@ -244,15 +244,15 @@ double *read_events(FILE * infile, int bin, int days, int *numevents,
 {
    int N = 0, nn = 0, goodN = 0;
    double *ts, *goodts, dtmp, lotime, hitime;
-   char line[80];
+   char line[80], *sptr=NULL;
 
    if (bin) {
       N = chkfilelen(infile, sizeof(double));
    } else {
       /* Read the input file once to count events */
       while (1) {
-         fgets(line, 80, infile);
-         if (!feof(infile)) {
+         sptr = fgets(line, 80, infile);
+         if (!feof(infile) && sptr != NULL && sptr[0] != '\n') {
             if (line[0] != '#' && sscanf(line, "%lf", &dtmp) == 1)
                N++;
          } else {
@@ -269,11 +269,11 @@ double *read_events(FILE * infile, int bin, int days, int *numevents,
 
    rewind(infile);
    if (bin) {
-      fread(ts, sizeof(double), N, infile);
+      chkfread(ts, sizeof(double), N, infile);
    } else {
       while (1) {
-         fgets(line, 80, infile);
-         if (!feof(infile)) {
+         sptr = fgets(line, 80, infile);
+         if (!feof(infile) && sptr != NULL && sptr[0] != '\n') {
             if (line[0] != '#' && sscanf(line, "%lf", &ts[nn]) == 1)
                nn++;
          } else {
@@ -573,7 +573,6 @@ void read_prepfoldinfo(prepfoldinfo * in, char *filename)
 {
    FILE *infile;
    int itmp, byteswap = 0;
-   float ftmp;
    char temp[16];
 
    infile = chkfopen(filename, "rb");
@@ -610,10 +609,35 @@ void read_prepfoldinfo(prepfoldinfo * in, char *filename)
    itmp = read_int(infile, byteswap);
    in->pgdev = calloc(itmp + 1, sizeof(char));
    chkfread(in->pgdev, sizeof(char), itmp, infile);
-   chkfread(in->rastr, sizeof(char), 16, infile);
-   chkfread(in->decstr, sizeof(char), 16, infile);
-   in->dt = read_double(infile, byteswap);
-   in->startT = read_double(infile, byteswap);
+   //chkfread(in->rastr, sizeof(char), 16, infile);
+   {
+       int has_posn = 1, ii;
+       chkfread(temp, sizeof(char), 16, infile);
+       /* Check to see if a position string was written */
+       for (ii = 0; ii < 16; ii++){
+           if (!isdigit(temp[ii]) &&
+               temp[ii] != ':' &&
+               temp[ii] != '.' &&
+               temp[ii] != '-' &&
+               temp[ii] != '\0'){
+               has_posn = 0;
+               break;
+           }
+       }
+       if (has_posn){
+           strcpy(in->rastr, temp);
+           chkfread(in->decstr, sizeof(char), 16, infile);
+           in->dt = read_double(infile, byteswap);
+           in->startT = read_double(infile, byteswap);
+       } else {
+           strcpy(in->rastr, "Unknown");
+           strcpy(in->decstr, "Unknown");
+           in->dt = *(double *)(temp + 0);
+           if (byteswap) in->dt = swap_double(in->dt);
+           in->startT = *(double *)(temp + sizeof(double));
+           if (byteswap) in->startT = swap_double(in->startT);
+       }
+   }
    in->endT = read_double(infile, byteswap);
    in->tepoch = read_double(infile, byteswap);
    in->bepoch = read_double(infile, byteswap);
@@ -623,19 +647,19 @@ void read_prepfoldinfo(prepfoldinfo * in, char *filename)
    in->bestdm = read_double(infile, byteswap);
    /* The .pow elements were written as doubles (Why??) */
    in->topo.pow = read_float(infile, byteswap);
-   ftmp = read_float(infile, byteswap);
+   read_float(infile, byteswap);
    in->topo.p1 = read_double(infile, byteswap);
    in->topo.p2 = read_double(infile, byteswap);
    in->topo.p3 = read_double(infile, byteswap);
    /* The .pow elements were written as doubles (Why??) */
    in->bary.pow = read_float(infile, byteswap);
-   ftmp = read_float(infile, byteswap);
+   read_float(infile, byteswap);
    in->bary.p1 = read_double(infile, byteswap);
    in->bary.p2 = read_double(infile, byteswap);
    in->bary.p3 = read_double(infile, byteswap);
    /* The .pow elements were written as doubles (Why??) */
    in->fold.pow = read_float(infile, byteswap);
-   ftmp = read_float(infile, byteswap);
+   read_float(infile, byteswap);
    in->fold.p1 = read_double(infile, byteswap);
    in->fold.p2 = read_double(infile, byteswap);
    in->fold.p3 = read_double(infile, byteswap);

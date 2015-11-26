@@ -12,10 +12,10 @@ char scopes[NUMSCOPES][40] =
 
 void read_inf_line_valstr(FILE *infofile, char *valstr, char *errdesc)
 {
-    char line[100], *sptr=NULL;
-    int ii;
+    char line[250], *sptr=NULL;
+    int ii, slen;
 
-    sptr = fgets(line, 100, infofile);
+    sptr = fgets(line, 250, infofile);
     if (sptr != NULL && sptr[0] != '\n' && 0 != (ii=strlen(sptr))) {
         // Check to see if this is a "standard" .inf line
         // which has an '=' in character 40
@@ -28,24 +28,33 @@ void read_inf_line_valstr(FILE *infofile, char *valstr, char *errdesc)
                     break;
             }
             if (ii + 1 == 0) {
-                sprintf(line, "Error:  no '=' to separate key/val while looking for '%s in readinf()'\n", errdesc);
+                sprintf(line, "Error:  no '=' to separate key/val while looking for '%s' in readinf()\n", errdesc);
                 perror(line);
                 exit(EXIT_FAILURE);
             }
             sptr = line + ii + 1;
         }
         sptr = remove_whitespace(sptr);
-        if (strlen(sptr)) {
-            strncpy(valstr, sptr, 100);
+        slen = strlen(sptr);
+        if (slen) {
+            if ((strcmp(errdesc, "data->name") == 0 && slen > 199) ||
+                (strcmp(errdesc, "data->telescope") == 0 && slen > 39) ||
+                (strcmp(errdesc, "data->band") == 0 && slen > 39) ||
+                (strcmp(errdesc, "data->name") != 0 && slen > 99)) {
+                sprintf(line, "Error:  value string is too long (%d char) while looking for '%s' in readinf()\n", slen, errdesc);
+                perror(line);
+                exit(EXIT_FAILURE);
+            }
+            strcpy(valstr, sptr);
         } else {
-            strncpy(valstr, "Unknown", 10);
+            strcpy(valstr, "Unknown");
         }
         return;
     } else {
         if (feof(infofile)) {
-            sprintf(line, "Error:  end-of-file while looking for '%s in readinf()'\n", errdesc);
+            sprintf(line, "Error:  end-of-file while looking for '%s' in readinf()\n", errdesc);
         } else {
-            sprintf(line, "Error:  found blank line while looking for '%s in readinf()'\n", errdesc);
+            sprintf(line, "Error:  found blank line while looking for '%s' in readinf()\n", errdesc);
         }
         perror(line);
         exit(EXIT_FAILURE);
@@ -200,9 +209,9 @@ void readinf(infodata * data, char *filenm)
         if (noteslen + strlen(tmp1) > 500) break;
         if (sptr) {
             if (noteslen==0)
-                strncpy(data->notes + noteslen, rmlead(tmp1), 100);
+                strcpy(data->notes + noteslen, rmlead(tmp1));
             else
-                strncpy(data->notes + noteslen, tmp1, 100);
+                strcpy(data->notes + noteslen, tmp1);
             noteslen += strlen(data->notes);
         } else {
             if (feof(infofile)) break;
@@ -215,7 +224,7 @@ void readinf(infodata * data, char *filenm)
 void chk_empty(char *instr)
 {
     if (strlen(remove_whitespace(instr))==0)
-        strncpy(instr, "Unknown", 10);
+        strcpy(instr, "Unknown");
 }
 
 

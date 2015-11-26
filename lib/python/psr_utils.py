@@ -1,6 +1,6 @@
 import numpy as Num
 import numpy.fft as FFT
-import Pgplot, ppgplot, bisect, sinc_interp
+import Pgplot, ppgplot, bisect, sinc_interp, parfile
 from scipy.stats import histogram
 from scipy.special import ndtr, ndtri, chdtrc, chdtri, fdtr, i0, kolmogorov
 from scipy.optimize import leastsq
@@ -69,8 +69,7 @@ def choose_N(orig_N):
     two_N = 2
     while two_N < orig_N:
         two_N *= 2
-    if two_N < new_N: return two_N
-    else: return new_N
+    return min(two_N, new_N)
 
 def running_avg(arr, navg):
     """
@@ -348,6 +347,42 @@ def asini_c(pb, mf):
     """
     return (mf * pb * pb / 8015123.37129)**(1.0 / 3.0)
 
+def ELL1_check(par_file, output=False):
+    """
+    ELL1_check(par_file):
+        Check the parfile to see if ELL1 can be safely used as the
+            binary model.  To work properly, we should have:
+            asini/c * ecc**2 << timing precision / sqrt(# TOAs)
+    """
+    psr = parfile.psr_par(par_file)
+    try:
+        lhs = psr.A1 * psr.E**2.0 * 1e6
+    except:
+        if output:
+            print "Can't compute asini/c * ecc**2, maybe parfile doesn't have a binary?"
+        return
+    try:
+        rhs = psr.TRES / Num.sqrt(psr.NTOA)
+    except:
+        if output:
+            print "Can't compute TRES / sqrt(# TOAs), maybe this isn't a TEMPO output parfile?"
+        return
+    if output:
+        print "Condition is asini/c * ecc**2 << timing precision / sqrt(# TOAs) to use ELL1:"
+        print "     asini/c * ecc**2 = %8.3g us"%lhs
+        print "  TRES / sqrt(# TOAs) = %8.3g us"%rhs
+    if lhs * 50.0 < rhs:
+        if output:
+            print "Should be fine."
+        return True
+    elif lhs * 5.0 < rhs:
+        if output:
+            print "Should be OK, but not optimal."
+        return True
+    else:
+        if output:
+            print "Should probably use BT or DD instead."
+        return False
 
 def accel_to_z(accel, T, reffreq, harm=1):
     """
@@ -363,9 +398,9 @@ def z_to_accel(z, T, reffreq, harm=1):
     """
     z_to_accel(z, T, reffreq, harm=1):
         Return the acceleration (in m/s/s) corresponding to the
-            accelsearch 'z' (i.e. number of bins drifted) at a 
+            accelsearch 'z' (i.e. number of bins drifted) at a
             reference frequency 'reffreq', for an observation
-            of duration 'T'. You can specify the harmonic number 
+            of duration 'T'. You can specify the harmonic number
             in 'harm'.
     """
     return z * SOL / (harm * reffreq * T * T)
@@ -405,7 +440,7 @@ def pulsar_mass(pb, x, mc, inc):
     def localmf(mp, mc=mc, mf=massfunct, i=inc*DEGTORAD):
         return mass_funct2(mp, mc, i) - mf
     return zeros.bisect(localmf, 0.0, 1000.0)
-        
+
 def companion_mass(pb, x, inc=60.0, mpsr=1.4):
     """
     companion_mass(pb, x, inc=60.0, mpsr=1.4):
@@ -420,7 +455,7 @@ def companion_mass(pb, x, inc=60.0, mpsr=1.4):
     def localmf(mc, mp=mpsr, mf=massfunct, i=inc*DEGTORAD):
         return mass_funct2(mp, mc, i) - mf
     return zeros.bisect(localmf, 0.0, 1000.0)
-        
+
 def companion_mass_limit(pb, x, mpsr=1.4):
     """
     companion_mass_limit(pb, x, mpsr=1.4):
@@ -432,7 +467,7 @@ def companion_mass_limit(pb, x, mpsr=1.4):
             'mpsr' is the mass of the pulsar in solar mass units.
     """
     return companion_mass(pb, x, inc=90.0, mpsr=mpsr)
-        
+
 def OMDOT(porb, e, Mp, Mc):
     """
     OMDOT(porb, e, Mp, Mc):
@@ -492,6 +527,24 @@ def shklovskii_effect(pm, D):
         or equivalently, Pdot_pm/P.
     """
     return (pm/1000.0*ARCSECTORAD/SECPERJULYR)**2.0 * KMPERKPC*D / (C/1000.0)
+
+def galactic_accel_simple(l, b, D):
+    """
+    galactic_accel_simple(l, b, D):
+        Return the approximate projected acceleration/c (in s^-1)
+        (a_p - a_ssb) dot n / c, where a_p and a_ssb are acceleration
+        vectors, and n is the los vector.  This assumes a simple spherically
+        symmetric isothermal sphere with v_o = 220 km/s circular velocity
+        and R_o = 8 kpc to the center of the sphere from the SSB.  l and
+        b are the galactic longitude and latitude (in deg) respectively,
+        and D is the distance in kpc.  This is eqn 2.4 of Phinney 1992.
+    """
+    v_o = 220.0 # km/s
+    R_o = 8.0 # kpc
+    A_sun = v_o*v_o / (C/1000.0 * R_o*KMPERKPC)
+    d = D/R_o
+    cbcl = Num.cos(b*DEGTORAD) * Num.cos(l*DEGTORAD)
+    return -A_sun * (cbcl + (d - cbcl) / (1.0 + d*d - 2.0*d*cbcl))
 
 def beam_halfwidth(obs_freq, dish_diam):
     """
@@ -735,7 +788,7 @@ def search_sensitivity(Ttot, G, BW, chan, freq, T, dm, ddm, dt, Pmin=0.001,
                       dm_smear(dm, BW/chan, freq)**2.0 + \
                       dm_smear(ddm/2.0, BW, freq)**2.0 + \
                       dt**2.0) / periods
-    return (periods, limiting_flux_dens(Ttot, G, BW, T, periods, widths, 
+    return (periods, limiting_flux_dens(Ttot, G, BW, T, periods, widths,
                                         polar=polar, factor=factor))
 
 def smin_noise(Ttot, G, BW, dt):
@@ -865,7 +918,7 @@ def interp_rotate(arr, bins, zoomfact=10):
     """
     newlen = len(arr)*zoomfact
     rotbins = int(Num.floor(bins*zoomfact+0.5)) % newlen
-    newarr = sinc_interp.periodic_interp(arr, zoomfact)  
+    newarr = sinc_interp.periodic_interp(arr, zoomfact)
     return rotate(newarr, rotbins)[::zoomfact]
 
 def fft_rotate(arr, bins):
@@ -1023,9 +1076,9 @@ def expcos_profile(N, phase, fwhm):
         phsval = Num.fmod(phsval + phi, TWOPI)
         phsval = Num.where(Num.greater(phsval, PI),
                            phsval - TWOPI, phsval)
-        denom = ((1 + 1/(8*k) + 9/(128*k*k) + 75/(1024*k**3) + 
+        denom = ((1 + 1/(8*k) + 9/(128*k*k) + 75/(1024*k**3) +
                  3675/(32768*k**4) + 59535/(262144*k**5)) / Num.sqrt(TWOPI*k))
-        return Num.where(Num.greater(Num.fabs(phsval/TWOPI), 3.0*fwhm), 0.0, 
+        return Num.where(Num.greater(Num.fabs(phsval/TWOPI), 3.0*fwhm), 0.0,
                          Num.exp(k*(Num.cos(phsval)-1.0))/denom)
     else:
         k = secant(fwhm_func, 1e-8, 0.5)
@@ -1109,7 +1162,7 @@ def gaussian_profile(N, phase, fwhm):
         print "Problem in gaussian prof:  mean = %f  sigma = %f" % \
               (mean, sigma)
         return Num.zeros(N, 'd')
-        
+
 def gauss_profile_params(profile, output=0):
     """
     gauss_profile_params(profile, output=0):
@@ -1121,7 +1174,7 @@ def gauss_profile_params(profile, output=0):
            ret[3] = Baseline (i.e. noise) average value.
            ret[4] = Residuals average value.
            ret[5] = Residuals standard deviation.
-        If 'output' is true, the fit will be plotted and 
+        If 'output' is true, the fit will be plotted and
            the return values will be printed.
     """
     profile = Num.asarray(profile)
@@ -1312,6 +1365,21 @@ def coherent_sum(amps):
     sumamps = Num.add.accumulate(amps*Num.exp(complex(0.0, 1.0)*phscorr))
     return Num.absolute(sumamps)**2.0
 
+def dft_vector_response(roff, z=0.0, w=0.0, phs=0.0, N=1000):
+    """
+    dft_vector_response(roff, z=0.0, w=0.0, phs=0.0, N=1000):
+        Return a complex vector addition of N vectors showing the DFT
+            response for a noise-less signal with Fourier frequency
+            offset roff, (roff=0 would mean that we are exactly at the
+            signal freq), average Fourier f-dot, z, and Fourier 2nd
+            deriv, w.  An optional phase in radians can be added.
+    """
+    r0 = roff - 0.5 * z + w / 12.0 # Make symmetric for all z and w
+    z0 = z - 0.5 * w
+    us = Num.linspace(0.0, 1.0, N)
+    phss = 2.0 * Num.pi * (us * (us * (us * w/6.0 + z0/2.0) + r0) + phs)
+    return Num.cumsum(Num.exp(Num.complex(0.0, 1.0) * phss)) / N
+
 def prob_power(power):
     """
     prob_power(power):
@@ -1347,7 +1415,7 @@ def equivalent_gaussian_sigma(p):
         Return the equivalent gaussian sigma corresponding
             to the cumulative gaussian probability p.  In other
             words, return x, such that Q(x) = p, where Q(x) is the
-            cumulative normal distribution.  For very small 
+            cumulative normal distribution.  For very small
     """
     logp = Num.log(p)
     if type(1.0) == type(logp):
@@ -1469,7 +1537,7 @@ def sigma_power(power):
         return Num.where(power > 36.0,
                          Num.sqrt(2.0 * power - Num.log(PI * power)),
                          extended_equiv_gaussian_sigma(log_prob_sum_powers(power, 1)))
-        
+
 def sigma_sum_powers(power, nsum):
     """
     sigma_sum_powers(power, nsum):
@@ -1572,11 +1640,20 @@ def pdot_from_B(p, B):
 
 def pdot_from_age(p, age):
     """
-    pdot_from_B(p, B):
+    pdot_from_age(p, age):
         Return the pdot that a pulsar with spin period 'p' (in sec)
         would experience given a characteristic age 'age' (in yrs).
     """
     return p / (2.0 * age * SECPERJULYR)
+
+def pdot_from_edot(p, edot, I=1.0e45):
+    """
+    pdot_from_edot(p, edot, I=1.0e45):
+        Return the pdot that a pulsar with spin period 'p (in sec)
+        would experience given an Edot 'edot' (in ergs/s) and a
+        moment of inertia I.
+    """
+    return (p**3.0 * edot) / (4.0 * PI * PI * I)
 
 def pulsar_age(f, fdot, n=3, fo=1e99):
     """
@@ -1615,23 +1692,21 @@ def pulsar_B_lightcyl(f, fdot):
     p, pd = p_to_f(f, fdot)
     return 2.9e8 * p**(-5.0/2.0) * Num.sqrt(pd)
 
-def psr_info(porf, pdorfd, time=None, input=None):
+def psr_info(porf, pdorfd, time=None, input=None, I=1e45):
     """
-    psr_info(porf, pdorfd, input=None):
+    psr_info(porf, pdorfd, time=None, input=None, I=1e45):
         Print a list of standard derived pulsar parameters based
         on the period (or frequency) and its first derivative.  The
         routine will automatically assume you are using periods if
         'porf' <= 1.0 and frequencies otherwise.  You can override this
-        by setting input='p' or 'f' appropriately.
+        by setting input='p' or 'f' appropriately.  If time is specified
+        (duration of an observation) it will also return the Fourier
+        frequency 'r' and Fourier fdot 'z'.  I is the NS moment of inertia.
     """
     if ((input==None and porf > 1.0) or
         (input=='f' or input=='F')):
         pdorfd = - pdorfd / (porf * porf)
         porf = 1.0 / porf
-    I = 1.0e45  # Moment of Inertia in g cm^2
-    Edot = 4.0 * PI * PI * I * pdorfd / porf ** 3.0
-    Bo = 3.2e19 * Num.sqrt(porf * pdorfd)
-    age = porf / (2.0 * pdorfd * 31557600.0) 
     [f, fd] = p_to_f(porf, pdorfd)
     print ""
     print "             Period = %f s" % porf
@@ -1641,17 +1716,17 @@ def psr_info(porf, pdorfd, time=None, input=None):
     if (time):
         print "       Fourier Freq = %g bins" % (f * time)
         print "      Fourier F-dot = %g bins" % (fd * time * time)
-    print "              E-dot = %g ergs/s" % Edot
-    print "    Surface B Field = %g gauss" % Bo
-    print " Characteristic Age = %g years" % age
+    print "              E-dot = %g ergs/s" % pulsar_edot(f, fd, I)
+    print "    Surface B Field = %g gauss" % pulsar_B(f, fd)
+    print " Characteristic Age = %g years" % pulsar_age(f, fd)
     print "          Assumed I = %g g cm^2" % I
     print ""
 
 def doppler(freq_observed, voverc):
     """doppler(freq_observed, voverc):
-        This routine returns the frequency emitted by a pulsar 
-        (in MHz) given that we observe the pulsar at frequency 
-        freq_observed (MHz) while moving with radial velocity 
+        This routine returns the frequency emitted by a pulsar
+        (in MHz) given that we observe the pulsar at frequency
+        freq_observed (MHz) while moving with radial velocity
         (in units of v/c) of voverc wrt the pulsar.
     """
     return freq_observed * (1.0 + voverc)

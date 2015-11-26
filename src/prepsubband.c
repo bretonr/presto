@@ -5,6 +5,11 @@
 #include "mask.h"
 #include "backend_common.h"
 
+// Use OpenMP
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 #define RAWDATA (cmd->pkmbP || cmd->bcpmP || cmd->wappP \
                  || cmd->spigotP || cmd->filterbankP || cmd->psrfitsP)
 
@@ -16,7 +21,7 @@
 
 /* Round a double or float to the nearest integer. */
 /* x.5s get rounded away from zero.                */
-#define NEAREST_INT(x) (int) (x < 0 ? ceil(x - 0.5) : floor(x + 0.5))
+#define NEAREST_LONG(x) (long) (x < 0 ? ceil(x - 0.5) : floor(x + 0.5))
 
 static void write_data(FILE * outfiles[], int numfiles, float **outdata,
                        int startpoint, int numtowrite);
@@ -30,9 +35,9 @@ static int read_PRESTO_subbands(FILE * infiles[], int numfiles,
                                 float clip_sigma, float *padvals);
 static int get_data(float **outdata, int blocksperread,
                     struct spectra_info *s,
-                    mask * obsmask, int *idispdts, int **offsets, 
+                    mask * obsmask, int *idispdts, int **offsets,
                     int *padding, short **subsdata);
-static void update_infodata(infodata * idata, int datawrote, int padwrote,
+static void update_infodata(infodata * idata, long datawrote, long padwrote,
                             int *barybins, int numbarybins, int downsamp);
 static void print_percent_complete(int current, int number);
 
@@ -56,11 +61,12 @@ int main(int argc, char *argv[])
    double max = -9.9E30, min = 9.9E30, var = 0.0, avg = 0.0;
    double *btoa = NULL, *ttoa = NULL, avgvoverc = 0.0;
    char obs[3], ephem[10], rastring[50], decstring[50];
-   int totnumtowrite, **offsets;
+   long totnumtowrite, totwrote = 0, padwrote = 0, datawrote = 0;
+   int **offsets;
    int ii, jj, numadded = 0, numremoved = 0, padding = 0;
    int numbarypts = 0, blocksperread = 0, worklen = 0;
-   int numread = 0, numtowrite = 0, totwrote = 0, datawrote = 0;
-   int padwrote = 0, padtowrite = 0, statnum = 0, good_padvals = 0;
+   int numread = 0, numtowrite = 0;
+   int padtowrite = 0, statnum = 0, good_padvals = 0;
    int numdiffbins = 0, *diffbins = NULL, *diffbinptr = NULL;
    int *idispdt;
    char *datafilenm;
@@ -88,7 +94,7 @@ int main(int argc, char *argv[])
    // If we are zeroDMing, make sure that clipping is off.
    if (cmd->zerodmP) cmd->noclipP = 1;
    s.clip_sigma = cmd->clip;
-   // -1 causes the data to determine if we use weights, scales, & 
+   // -1 causes the data to determine if we use weights, scales, &
    // offsets for PSRFITS or flip the band for any data type where
    // we can figure that out with the data
    s.apply_flipband = (cmd->invertP) ? 1 : -1;
@@ -105,7 +111,22 @@ int main(int argc, char *argv[])
        s.use_poln = cmd->ifs + 1;
    }
    if (!cmd->numoutP)
-      cmd->numout = INT_MAX;
+      cmd->numout = LONG_MAX;
+
+   if (cmd->ncpus > 1) {
+#ifdef _OPENMP
+      int maxcpus = omp_get_num_procs();
+      int openmp_numthreads = (cmd->ncpus <= maxcpus) ? cmd->ncpus : maxcpus;
+      // Make sure we are not dynamically setting the number of threads
+      omp_set_dynamic(0);
+      omp_set_num_threads(openmp_numthreads);
+      printf("Using %d threads with OpenMP\n\n", openmp_numthreads);
+#endif
+   } else {
+#ifdef _OPENMP
+   omp_set_num_threads(1); // Explicitly turn off OpenMP
+#endif
+   }
 
 #ifdef DEBUG
    showOptionValues();
@@ -136,7 +157,7 @@ int main(int argc, char *argv[])
            exit(1);
        }
    }
-   
+
    if (!RAWDATA) s.files = (FILE **)malloc(sizeof(FILE *) * s.num_files);
    if (RAWDATA || insubs) {
        char description[40];
@@ -256,7 +277,7 @@ int main(int argc, char *argv[])
    if (insubs) avgdm = idata.dm;
    if (RAWDATA) idata.dm = avgdm;
    dsdt = cmd->downsamp * idata.dt;
-   BW_ddelay = delay_from_dm(maxdm, idata.freq) - 
+   BW_ddelay = delay_from_dm(maxdm, idata.freq) -
        delay_from_dm(maxdm, idata.freq + (idata.num_chan-1) * idata.chan_wid);
    blocksperread = ((int) (BW_ddelay / idata.dt) / s.spectra_per_subint + 1);
    worklen = s.spectra_per_subint * blocksperread;
@@ -291,21 +312,21 @@ int main(int argc, char *argv[])
    if (cmd->numoutP)
       totnumtowrite = cmd->numout;
    else
-      totnumtowrite = (int) idata.N / cmd->downsamp;
+      totnumtowrite = (long) idata.N / cmd->downsamp;
 
    if (cmd->nobaryP) {          /* Main loop if we are not barycentering... */
        double *dispdt;
 
        /* Dispersion delays (in bins).  The high freq gets no delay   */
        /* All other delays are positive fractions of bin length (dt)  */
-       
+
        dispdt = subband_search_delays(s.num_channels, cmd->nsub, avgdm,
                                       idata.freq, idata.chan_wid, 0.0);
        idispdt = gen_ivect(s.num_channels);
        for (ii = 0; ii < s.num_channels; ii++)
-           idispdt[ii] = NEAREST_INT(dispdt[ii] / idata.dt);
+           idispdt[ii] = NEAREST_LONG(dispdt[ii] / idata.dt);
        vect_free(dispdt);
-       
+
       /* The subband dispersion delays (see note above) */
 
       offsets = gen_imatrix(cmd->numdms, cmd->nsub);
@@ -316,7 +337,7 @@ int main(int argc, char *argv[])
                                     idata.freq, idata.chan_wid, 0.0);
          dtmp = subdispdt[cmd->nsub - 1];
          for (jj = 0; jj < cmd->nsub; jj++)
-            offsets[ii][jj] = NEAREST_INT((subdispdt[jj] - dtmp) / dsdt);
+            offsets[ii][jj] = NEAREST_LONG((subdispdt[jj] - dtmp) / dsdt);
          vect_free(subdispdt);
       }
 
@@ -377,12 +398,8 @@ int main(int argc, char *argv[])
       double maxvoverc = -1.0, minvoverc = 1.0, *voverc = NULL;
       double *dispdt;
 
-      /* What ephemeris will we use?  (Default is DE200) */
-
-      if (cmd->de405P)
-         strcpy(ephem, "DE405");
-      else
-         strcpy(ephem, "DE200");
+      /* What ephemeris will we use?  (Default is DE405) */
+      strcpy(ephem, "DE405");
 
       /* Define the RA and DEC of the observation */
 
@@ -431,7 +448,7 @@ int main(int argc, char *argv[])
                                      idata.freq, idata.chan_wid, avgvoverc);
       idispdt = gen_ivect(s.num_channels);
       for (ii = 0; ii < s.num_channels; ii++)
-          idispdt[ii] = NEAREST_INT(dispdt[ii] / idata.dt);
+          idispdt[ii] = NEAREST_LONG(dispdt[ii] / idata.dt);
       vect_free(dispdt);
 
       /* The subband dispersion delays (see note above) */
@@ -444,7 +461,7 @@ int main(int argc, char *argv[])
                                     idata.freq, idata.chan_wid, avgvoverc);
          dtmp = subdispdt[cmd->nsub - 1];
          for (jj = 0; jj < cmd->nsub; jj++)
-            offsets[ii][jj] = NEAREST_INT((subdispdt[jj] - dtmp) / dsdt);
+            offsets[ii][jj] = NEAREST_LONG((subdispdt[jj] - dtmp) / dsdt);
          vect_free(subdispdt);
       }
 
@@ -460,11 +477,11 @@ int main(int argc, char *argv[])
          int oldbin = 0, currentbin;
          double lobin, hibin, calcpt;
 
-         numdiffbins = abs(NEAREST_INT(btoa[numbarypts - 1])) + 1;
+         numdiffbins = abs(NEAREST_LONG(btoa[numbarypts - 1])) + 1;
          diffbins = gen_ivect(numdiffbins);
          diffbinptr = diffbins;
          for (ii = 1; ii < numbarypts; ii++) {
-            currentbin = NEAREST_INT(btoa[ii]);
+            currentbin = NEAREST_LONG(btoa[ii]);
             if (currentbin != oldbin) {
                if (currentbin > 0) {
                   calcpt = oldbin + 0.5;
@@ -478,7 +495,7 @@ int main(int argc, char *argv[])
                while (fabs(calcpt) < fabs(btoa[ii])) {
                   /* Negative bin number means remove that bin */
                   /* Positive bin number means add a bin there */
-                  *diffbinptr = NEAREST_INT(LININTERP(calcpt, btoa[ii - 1],
+                  *diffbinptr = NEAREST_LONG(LININTERP(calcpt, btoa[ii - 1],
                                                       btoa[ii], lobin, hibin));
                   diffbinptr++;
                   calcpt = (currentbin > 0) ? calcpt + 1.0 : calcpt - 1.0;
@@ -496,7 +513,7 @@ int main(int argc, char *argv[])
          subsdata = gen_smatrix(cmd->nsub, worklen / cmd->downsamp);
       else
          outdata = gen_fmatrix(cmd->numdms, worklen / cmd->downsamp);
-      numread = get_data(outdata, blocksperread, &s, 
+      numread = get_data(outdata, blocksperread, &s,
                          &obsmask, idispdt, offsets, &padding, subsdata);
 
       while (numread == worklen) {      /* Loop to read and write the data */
@@ -534,8 +551,8 @@ int main(int argc, char *argv[])
             statnum += numtowrite;
          }
 
-         if ((datawrote == abs(*diffbinptr)) && 
-             (numwritten != numread) && 
+         if ((datawrote == abs(*diffbinptr)) &&
+             (numwritten != numread) &&
              (totwrote < cmd->numout)) {  /* Add/remove a bin */
             int skip, nextdiffbin;
 
@@ -658,9 +675,9 @@ int main(int argc, char *argv[])
       var /= (datawrote - 1);
       print_percent_complete(1, 1);
       printf("\n\nDone.\n\nSimple statistics of the output data:\n");
-      printf("             Data points written:  %d\n", totwrote);
+      printf("             Data points written:  %ld\n", totwrote);
       if (padwrote)
-         printf("          Padding points written:  %d\n", padwrote);
+         printf("          Padding points written:  %ld\n", padwrote);
       if (!cmd->nobaryP) {
          if (numadded)
             printf("    Bins added for barycentering:  %d\n", numadded);
@@ -674,9 +691,9 @@ int main(int argc, char *argv[])
       printf("\n");
    } else {
       printf("\n\nDone.\n");
-      printf("             Data points written:  %d\n", totwrote);
+      printf("             Data points written:  %ld\n", totwrote);
       if (padwrote)
-         printf("          Padding points written:  %d\n", padwrote);
+         printf("          Padding points written:  %ld\n", padwrote);
       if (!cmd->nobaryP) {
          if (numadded)
             printf("    Bins added for barycentering:  %d\n", numadded);
@@ -776,13 +793,13 @@ static int read_PRESTO_subbands(FILE * infiles[], int numfiles,
 /* Read short int subband data written by prepsubband */
 {
    int ii, jj, index, numread = 0, mask = 0, offset;
-   short subsdata[SUBSBLOCKLEN]; 
+   short subsdata[SUBSBLOCKLEN];
    double starttime, run_avg;
    float subband_sum;
    static int currentblock = 0;
 
    if (obsmask->numchan) mask = 1;
-   
+
    /* Read the data */
    for (ii = 0; ii < numfiles; ii++) {
       numread = chkfread(subsdata, sizeof(short), SUBSBLOCKLEN, infiles[ii]);
@@ -829,16 +846,16 @@ static int read_PRESTO_subbands(FILE * infiles[], int numfiles,
    if (cmd->zerodmP==1) {
        for (ii = 0; ii < SUBSBLOCKLEN; ii++) {
            offset = ii * numfiles;
-           subband_sum = 0.0; 
+           subband_sum = 0.0;
            for (jj = offset; jj < offset+numfiles; jj++) {
                subband_sum += subbanddata[jj];
-           }    
+           }
            subband_sum /= (float) numfiles;
            /* Remove the channel average */
            for (jj = offset; jj < offset+numfiles; jj++) {
                subbanddata[jj] -= subband_sum;
-           }    
-       }    
+           }
+       }
    }
 
    currentblock += 1;
@@ -849,7 +866,7 @@ static int read_PRESTO_subbands(FILE * infiles[], int numfiles,
 
 static int get_data(float **outdata, int blocksperread,
                     struct spectra_info *s,
-                    mask * obsmask, int *idispdts, int **offsets, 
+                    mask * obsmask, int *idispdts, int **offsets,
                     int *padding, short **subsdata)
 {
    static int firsttime = 1, *maskchans = NULL, blocksize;
@@ -867,13 +884,13 @@ static int get_data(float **outdata, int blocksperread,
       { // Make sure that our working blocks are long enough...
          for (ii = 0; ii < s->num_channels; ii++) {
             if (idispdts[ii] > worklen)
-               printf("WARNING!:  (idispdts[%d] = %d) > (worklen = %d)\n", 
+               printf("WARNING!:  (idispdts[%d] = %d) > (worklen = %d)\n",
                       ii, idispdts[ii], worklen);
          }
          for (ii = 0; ii < cmd->numdms; ii++) {
             for (jj = 0; jj < cmd->nsub; jj++) {
                if (offsets[ii][jj] > dsworklen)
-                  printf("WARNING!:  (offsets[%d][%d] = %d) > (dsworklen = %d)\n", 
+                  printf("WARNING!:  (offsets[%d][%d] = %d) > (dsworklen = %d)\n",
                          ii, jj, offsets[ii][jj], dsworklen);
             }
          }
@@ -899,7 +916,7 @@ static int get_data(float **outdata, int blocksperread,
       if (RAWDATA || insubs) {
          for (ii = 0; ii < blocksperread; ii++) {
              if (RAWDATA)
-                 numread = read_subbands(currentdata + ii * blocksize, idispdts, 
+                 numread = read_subbands(currentdata + ii * blocksize, idispdts,
                                          cmd->nsub, s, 0, &tmppad,
                                          maskchans, &nummasked, obsmask);
              else if (insubs)
@@ -919,16 +936,16 @@ static int get_data(float **outdata, int blocksperread,
       }
       /* Downsample the subband data if needed */
       if (cmd->downsamp > 1) {
-         int kk, offset, dsoffset, index, dsindex;
+         int kk, index;
          float ftmp;
          for (ii = 0; ii < dsworklen; ii++) {
-            dsoffset = ii * cmd->nsub;
-            offset = dsoffset * cmd->downsamp;
+            const int dsoffset = ii * cmd->nsub;
+            const int offset = dsoffset * cmd->downsamp;
             for (jj = 0; jj < cmd->nsub; jj++) {
-               dsindex = dsoffset + jj;
+               const int dsindex = dsoffset + jj;
                index = offset + jj;
-               currentdsdata[dsindex] = 0.0;
-               for (kk = 0, ftmp = 0.0; kk < cmd->downsamp; kk++) {
+               currentdsdata[dsindex] = ftmp = 0.0;
+               for (kk = 0; kk < cmd->downsamp; kk++) {
                   ftmp += currentdata[index];
                   index += cmd->nsub;
                }
@@ -994,7 +1011,7 @@ static void print_percent_complete(int current, int number)
 }
 
 
-static void update_infodata(infodata * idata, int datawrote, int padwrote,
+static void update_infodata(infodata * idata, long datawrote, long padwrote,
                             int *barybins, int numbarybins, int downsamp)
 /* Update our infodata for barycentering and padding */
 {
